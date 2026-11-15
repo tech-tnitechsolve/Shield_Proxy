@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export PATH="/usr/local/go/bin:$PATH"
 
-# ==================== CAU HINH GITHUB MAC DINH ====================
-GITHUB_REPO="Shield_Proxy"
+# ==================== CAU HINH REPO MAC DINH ====================
+GITHUB_REPO="tech-tnitechsolve/Shield_Proxy"
 GITHUB_BRANCH="main"
-# ==================================================================
+# ================================================================
 
 DASH_PORT="8888"
 START_PORT="10001"
@@ -22,17 +23,24 @@ while [[ $# -gt 0 ]]; do
     --uninstall)
       echo "[*] Dang go bo ProxyShield Pro..."
       systemctl disable --now proxy-shield 2>/dev/null || true
-      rm -f /etc/systemd/system/proxy-shield.service /usr/local/bin/proxy-shield /usr/local/bin/ps-health /etc/cron.d/proxy-shield-backup
+      rm -f /etc/systemd/system/proxy-shield.service \
+            /usr/local/bin/proxy-shield \
+            /usr/local/bin/ps-health \
+            /usr/local/bin/ps-update \
+            /usr/local/bin/ps-firewall.sh \
+            /etc/cron.d/proxy-shield-backup \
+            /etc/sysctl.d/99-proxyshield.conf
       rm -rf /opt/proxy-shield-src
       systemctl daemon-reload
-      echo "[+] Da go bo sach se (file cau hinh /var/lib/proxy-shield van duoc giu lai)."
+      echo "[+] Da go bo sach se (cau hinh tai /var/lib/proxy-shield van duoc giu lai)."
       exit 0
       ;;
-    *) echo "Tham so khong hop le: $1"; exit 1 ;;
+    *) echo "[!] Tham so khong hop le: $1"; exit 1 ;;
   esac
 done
 
 [[ $EUID -eq 0 ]] || { echo "[!] Vui long chay bang quyen root: sudo bash ..."; exit 1; }
+command -v apt-get >/dev/null 2>&1 || { echo "[!] Script ho tro Ubuntu/Debian (apt-get)."; exit 1; }
 
 SRC_DIR="/opt/proxy-shield-src"
 DATA_DIR="/var/lib/proxy-shield"
@@ -41,14 +49,11 @@ SVC_PATH="/etc/systemd/system/proxy-shield.service"
 IS_FRESH=0
 [[ ! -f "${DATA_DIR}/config.json" ]] && IS_FRESH=1
 
-if [[ -z "$INIT_ADMIN_PASS" ]]; then
-  INIT_ADMIN_PASS=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 12 || echo "Admin2026Pro")
-fi
-
-echo "[*] 1/6. Cai dat cac goi phu thuoc & cong cu giam sat..."
+echo "[*] 1/6. Cai dat goi phu thuoc & cong cu giam sat..."
 export DEBIAN_FRONTEND=noninteractive
-apt-get update -y -qq
-apt-get install -y -qq curl ca-certificates tar vnstat tcpdump iproute2 conntrack >/dev/null 2>&1 || true
+apt-get -o DPkg::Lock::Timeout=60 update -y -qq
+apt-get -o DPkg::Lock::Timeout=60 install -y -qq --no-install-recommends \
+  curl ca-certificates tar vnstat tcpdump iproute2 conntrack iptables >/dev/null 2>&1 || true
 
 # Dam bao Go >= 1.18
 NEED_GO=0
@@ -60,7 +65,7 @@ else
 fi
 
 if (( NEED_GO == 1 )); then
-  apt-get install -y -qq golang-go >/dev/null 2>&1 || true
+  apt-get -o DPkg::Lock::Timeout=60 install -y -qq golang-go >/dev/null 2>&1 || true
   GO_MINOR=$(go version 2>/dev/null | sed -n 's/.*go1\.\([0-9]*\).*/\1/p' || echo 0)
   if (( ${GO_MINOR:-0} < 18 )); then
     ARCH=$(uname -m)
@@ -71,36 +76,55 @@ if (( NEED_GO == 1 )); then
     esac
     GO_VER=$(curl -fsSL "https://go.dev/VERSION?m=text" 2>/dev/null | head -n1 || echo "go1.23.6")
     echo "[*] Dang tai Go chinh thuc (${GO_VER}-${GO_ARCH})..."
-    curl -fsSL "https://go.dev/dl/${GO_VER}.linux-${GO_ARCH}.tar.gz" -o /tmp/go.tar.gz
+    curl -4 -fsSL "https://go.dev/dl/${GO_VER}.linux-${GO_ARCH}.tar.gz" -o /tmp/go.tar.gz
     rm -rf /usr/local/go && tar -C /usr/local -xzf /tmp/go.tar.gz && rm -f /tmp/go.tar.gz
     export PATH="/usr/local/go/bin:$PATH"
   fi
 fi
 
-echo "[*] 2/6. Lay ma nguon ProxyShield Pro..."
-mkdir -p "$SRC_DIR" "$DATA_DIR"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || echo "")"
+echo "[*] 2/6. Xoa cache & tai ma nguon moi nhat tu GitHub..."
+rm -rf "$SRC_DIR" && mkdir -p "$SRC_DIR" "$DATA_DIR"
+
+LOCAL_SCRIPT="${BASH_SOURCE[0]:-}"
+SCRIPT_DIR=""
+if [[ -n "$LOCAL_SCRIPT" && -f "$LOCAL_SCRIPT" ]]; then
+  SCRIPT_DIR="$(cd "$(dirname "$LOCAL_SCRIPT")" && pwd)"
+fi
 
 if [[ -n "$SCRIPT_DIR" && -f "$SCRIPT_DIR/go.mod" && -f "$SCRIPT_DIR/main.go" && -f "$SCRIPT_DIR/ui.html" ]]; then
   echo "[*] Build tu thu muc local: $SCRIPT_DIR"
   cp -f "$SCRIPT_DIR"/*.go "$SCRIPT_DIR/go.mod" "$SCRIPT_DIR/ui.html" "$SRC_DIR/"
 else
-  echo "[*] Tai ma nguon tu GitHub: ${GITHUB_REPO} (${GITHUB_BRANCH})..."
+  LATEST_SHA=$(curl -4 -fsSL -H "Accept: application/vnd.github.sha" -H "Cache-Control: no-cache" \
+    "https://api.github.com/repos/${GITHUB_REPO}/commits/${GITHUB_BRANCH}?t=$(date +%s)" 2>/dev/null || echo "")
+
   TMP_TAR="/tmp/proxyshield.tar.gz"
   TMP_EXT="/tmp/proxyshield-extract"
-  rm -rf "$TMP_EXT" && mkdir -p "$TMP_EXT"
-  curl -4 -fsSL "https://github.com/${GITHUB_REPO}/archive/refs/heads/${GITHUB_BRANCH}.tar.gz" -o "$TMP_TAR"
+  rm -rf "$TMP_TAR" "$TMP_EXT" && mkdir -p "$TMP_EXT"
+
+  if [[ "$LATEST_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+    echo "[*] Bat duoc Commit moi nhat: ${LATEST_SHA:0:7} (Bypass cache GitHub thanh cong)"
+    TAR_URL="https://github.com/${GITHUB_REPO}/archive/${LATEST_SHA}.tar.gz"
+  else
+    echo "[*] Tai truc tiep nhanh ${GITHUB_BRANCH} (No-cache query)..."
+    TAR_URL="https://github.com/${GITHUB_REPO}/archive/refs/heads/${GITHUB_BRANCH}.tar.gz?t=$(date +%s)"
+  fi
+
+  curl -4 -fsSL -H "Cache-Control: no-cache" "$TAR_URL" -o "$TMP_TAR"
   tar -xzf "$TMP_TAR" -C "$TMP_EXT" --strip-components=1
   cp -f "$TMP_EXT"/*.go "$TMP_EXT/go.mod" "$TMP_EXT/ui.html" "$SRC_DIR/"
   rm -rf "$TMP_TAR" "$TMP_EXT"
 fi
 
-echo "[*] 3/6. Bien dich binary Go native (CGO_ENABLED=0)..."
-(cd "$SRC_DIR" && CGO_ENABLED=0 go build -ldflags="-s -w" -o "$BIN_PATH" .)
+echo "[*] 3/6. Bien dich sach binary Go native (CGO_ENABLED=0, rebuild -a)..."
+(cd "$SRC_DIR" && CGO_ENABLED=0 go build -a -ldflags="-s -w" -o "$BIN_PATH" .)
 chmod +x "$BIN_PATH"
 
-echo "[*] 4/6. Toi uu Kernel & Fix rule REJECT mac dinh cua Oracle Ubuntu..."
+echo "[*] 4/6. Toi uu Kernel & Tu dong go rule REJECT cua Oracle Ubuntu..."
 END_PORT=$(( START_PORT + 2500 ))
+modprobe nf_conntrack 2>/dev/null || true
+modprobe tcp_bbr 2>/dev/null || true
+
 cat << EOF > /etc/sysctl.d/99-proxyshield.conf
 net.core.default_qdisc = fq
 net.ipv4.tcp_congestion_control = bbr
@@ -123,16 +147,27 @@ fs.nr_open = 2097152
 EOF
 sysctl --system >/dev/null 2>&1 || true
 
+# Script firewall chay moi lan khoi dong service de chong Oracle REJECT tro lai sau reboot
+cat << EOF > /usr/local/bin/ps-firewall.sh
+#!/usr/bin/env bash
 if command -v iptables >/dev/null 2>&1; then
   while iptables -C INPUT -j REJECT --reject-with icmp-host-prohibited 2>/dev/null; do
     iptables -D INPUT -j REJECT --reject-with icmp-host-prohibited 2>/dev/null || break
   done
-  iptables -C INPUT -p tcp --dport "$DASH_PORT" -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -p tcp --dport "$DASH_PORT" -j ACCEPT 2>/dev/null || true
+  iptables -C INPUT -p tcp --dport "${DASH_PORT}" -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -p tcp --dport "${DASH_PORT}" -j ACCEPT 2>/dev/null || true
   iptables -C INPUT -p tcp --dport "${START_PORT}:${END_PORT}" -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -p tcp --dport "${START_PORT}:${END_PORT}" -j ACCEPT 2>/dev/null || true
-  if command -v netfilter-persistent >/dev/null 2>&1; then netfilter-persistent save >/dev/null 2>&1 || true; fi
 fi
+if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
+  ufw allow "${DASH_PORT}/tcp" >/dev/null 2>&1 || true
+  ufw allow "${START_PORT}:${END_PORT}/tcp" >/dev/null 2>&1 || true
+fi
+exit 0
+EOF
+chmod +x /usr/local/bin/ps-firewall.sh
+/usr/local/bin/ps-firewall.sh
+if command -v netfilter-persistent >/dev/null 2>&1; then netfilter-persistent save >/dev/null 2>&1 || true; fi
 
-echo "[*] 5/6. Cai dat Auto-Backup & lenh giam sat 'ps-health'..."
+echo "[*] 5/6. Cai dat Auto-Backup, 'ps-health' va 'ps-update'..."
 mkdir -p /var/backups/proxy-shield
 cat << 'EOF' > /etc/cron.d/proxy-shield-backup
 0 3 * * * root cp -f /var/lib/proxy-shield/config.json /var/backups/proxy-shield/config.$(date +\%F).json && find /var/backups/proxy-shield -name "config.*.json" -mtime +7 -delete
@@ -162,7 +197,24 @@ echo "================================================================="
 EOF
 chmod +x /usr/local/bin/ps-health
 
+cat << EOF > /usr/local/bin/ps-update
+#!/usr/bin/env bash
+set -euo pipefail
+[[ \$EUID -eq 0 ]] || { echo "[!] Chay bang quyen root: sudo ps-update"; exit 1; }
+SHA=\$(curl -4 -sSL -H "Accept: application/vnd.github.sha" -H "Cache-Control: no-cache" "https://api.github.com/repos/${GITHUB_REPO}/commits/${GITHUB_BRANCH}?t=\$(date +%s)" 2>/dev/null || echo "")
+REF="${GITHUB_BRANCH}"
+[[ "\$SHA" =~ ^[0-9a-f]{40}\$ ]] && REF="\$SHA"
+echo "[*] Dang cap nhat tu commit: \${REF}"
+curl -4 -sSL -H "Cache-Control: no-cache" "https://raw.githubusercontent.com/${GITHUB_REPO}/\${REF}/install.sh?t=\$(date +%s)" | tr -d '\r' | bash -s -- --repo "${GITHUB_REPO}" --branch "${GITHUB_BRANCH}" --dash-port "${DASH_PORT}" --start-port "${START_PORT}"
+EOF
+chmod +x /usr/local/bin/ps-update
+
 echo "[*] 6/6. Kich hoat Systemd Service..."
+EXEC_ARGS="--dash-port=${DASH_PORT} --data-dir=${DATA_DIR} --init-admin-user=${INIT_ADMIN_USER} --init-start-port=${START_PORT}"
+if [[ -n "$INIT_ADMIN_PASS" ]]; then
+  EXEC_ARGS="${EXEC_ARGS} --init-admin-pass=${INIT_ADMIN_PASS}"
+fi
+
 cat << EOF > "$SVC_PATH"
 [Unit]
 Description=ProxyShield v2.0 Pro Gateway & Deep Inspector
@@ -171,7 +223,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=${BIN_PATH} --dash-port=${DASH_PORT} --data-dir=${DATA_DIR} --init-admin-user=${INIT_ADMIN_USER} --init-admin-pass=${INIT_ADMIN_PASS} --init-start-port=${START_PORT}
+ExecStartPre=/usr/local/bin/ps-firewall.sh
+ExecStart=${BIN_PATH} ${EXEC_ARGS}
 Restart=always
 RestartSec=2
 LimitNOFILE=1048576
@@ -189,15 +242,12 @@ echo "==========================================================================
 echo " CAI DAT THANH CONG PROXYSHIELD v2.0 PRO!"
 echo "--------------------------------------------------------------------------"
 echo "  URL Dashboard : http://${PUB_IP}:${DASH_PORT}"
-if (( IS_FRESH == 1 )); then
-  echo "  Admin User    : ${INIT_ADMIN_USER}"
-  echo "  Admin Pass    : ${INIT_ADMIN_PASS}  <-- HAY LUU LAI & DOI TRONG SETTINGS!"
+if (( IS_FRESH == 1 )) && [[ -z "$INIT_ADMIN_PASS" ]]; then
+  echo "  Khoi tao Admin: Mo link tren de TAO TAI KHOAN & MAT KHAU truc tiep!"
 else
-  echo "  Cau hinh cu   : Da giu nguyen tai khoan, mat khau & proxy truoc do."
+  echo "  Cau hinh      : Da giu nguyen / su dung thong tin Admin da cau hinh."
 fi
 echo "  Lenh kiem tra : sudo ps-health"
-echo "--------------------------------------------------------------------------"
-echo "  [ORACLE CLOUD] Nho mo TCP port ${DASH_PORT} va dai ${START_PORT}-${END_PORT}"
-echo "  trong Security Lists tren web Oracle Cloud!"
+echo "  Lenh cap nhat : sudo ps-update"
 echo "=========================================================================="
 systemctl status proxy-shield --no-pager

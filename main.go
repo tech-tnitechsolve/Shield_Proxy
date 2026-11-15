@@ -444,11 +444,18 @@ func saveConfigFile(cfg Config) error {
 	return os.WriteFile(configPath, b, 0600)
 }
 
+func isSetupRequired() bool {
+	cfgMu.RLock()
+	req := appCfg.AdminUser == "" || appCfg.AdminPassHash == ""
+	cfgMu.RUnlock()
+	return req
+}
+
 func loadOrInitConfig(initAdminUser, initAdminPass string, initStartPort int) Config {
 	b, err := os.ReadFile(configPath)
 	if err == nil {
 		var c Config
-		if json.Unmarshal(b, &c) == nil && c.AdminUser != "" && c.AdminPassHash != "" {
+		if json.Unmarshal(b, &c) == nil {
 			if c.StartPort <= 0 {
 				c.StartPort = 10001
 			}
@@ -458,11 +465,18 @@ func loadOrInitConfig(initAdminUser, initAdminPass string, initStartPort int) Co
 			return c
 		}
 	}
-	salt := randomHex(16)
+
+	var aUser, aSalt, aHash string
+	if strings.TrimSpace(initAdminPass) != "" {
+		aUser = initAdminUser
+		aSalt = randomHex(16)
+		aHash = hashPassword(aSalt, strings.TrimSpace(initAdminPass))
+	}
+
 	c := Config{
-		AdminUser:      initAdminUser,
-		AdminSalt:      salt,
-		AdminPassHash:  hashPassword(salt, initAdminPass),
+		AdminUser:      aUser,
+		AdminSalt:      aSalt,
+		AdminPassHash:  aHash,
 		ProxyUser:      "blx" + randomHex(3),
 		ProxyPass:      randomHex(8),
 		StartPort:      initStartPort,
@@ -498,7 +512,7 @@ func main() {
 	dashFlag := flag.Int("dash-port", 8888, "Web dashboard port")
 	dirFlag := flag.String("data-dir", "/var/lib/proxy-shield", "Data directory")
 	initUser := flag.String("init-admin-user", "admin", "Initial admin username")
-	initPass := flag.String("init-admin-pass", "Admin2026Pro", "Initial admin password")
+	initPass := flag.String("init-admin-pass", "", "Initial admin password (empty = setup on web UI)")
 	initStart := flag.Int("init-start-port", 10001, "Initial proxy start port")
 	flag.Parse()
 

@@ -119,6 +119,12 @@ func writeJSON(w http.ResponseWriter, code int, v interface{}) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
+func apiAuthStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]bool{
+		"setup_required": isSetupRequired(),
+	})
+}
+
 func apiLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -137,20 +143,35 @@ func apiLogin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 		return
 	}
+	u := strings.TrimSpace(body.Username)
+	p := strings.TrimSpace(body.Password)
 
-	cfgMu.RLock()
-	au, as, ah := appCfg.AdminUser, appCfg.AdminSalt, appCfg.AdminPassHash
-	cfgMu.RUnlock()
-
-	if body.Username != au || !verifyPassword(as, ah, body.Password) {
-		recordLoginFail(ip)
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Sai tai khoan hoac mat khau!"})
-		return
+	cfgMu.Lock()
+	if appCfg.AdminUser == "" || appCfg.AdminPassHash == "" {
+		if len(u) < 3 || len(p) < 4 {
+			cfgMu.Unlock()
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Username >= 3 ky tu va Mat khau >= 4 ky tu!"})
+			return
+		}
+		salt := randomHex(16)
+		appCfg.AdminUser = u
+		appCfg.AdminSalt = salt
+		appCfg.AdminPassHash = hashPassword(salt, p)
+		_ = saveConfigFile(appCfg)
+		cfgMu.Unlock()
+	} else {
+		au, as, ah := appCfg.AdminUser, appCfg.AdminSalt, appCfg.AdminPassHash
+		cfgMu.Unlock()
+		if u != au || !verifyPassword(as, ah, p) {
+			recordLoginFail(ip)
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Sai tai khoan hoac mat khau!"})
+			return
+		}
 	}
 
 	tok := randomHex(24)
 	sessMu.Lock()
-	sessions[tok] = sessionInfo{user: au, exp: time.Now().Add(24 * time.Hour)}
+	sessions[tok] = sessionInfo{user: u, exp: time.Now().Add(24 * time.Hour)}
 	sessMu.Unlock()
 
 	http.SetCookie(w, &http.Cookie{
@@ -1017,6 +1038,7 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 func startWebDashboard(port int) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", handleIndex)
+	mux.HandleFunc("/api/auth/status", apiAuthStatus)
 	mux.HandleFunc("/api/login", apiLogin)
 	mux.HandleFunc("/api/logout", apiLogout)
 	mux.HandleFunc("/api/overview", requireAuth(apiOverview))

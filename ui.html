@@ -54,11 +54,11 @@
 <body>
 
 <div id="loginView" class="login-box hidden">
-  <h2 style="margin-top:0;color:var(--accent)">ProxyShield v2.0 Pro</h2>
-  <p style="color:var(--muted);font-size:12.5px;margin-bottom:18px">Dang nhap he thong Gateway &amp; Deep Inspector</p>
-  <div class="form-group"><label>Tai khoan Admin</label><input id="lu" value="admin"></div>
-  <div class="form-group"><label>Mat khau</label><input id="lp" type="password" onkeydown="if(event.key==='Enter')doLogin()"></div>
-  <button class="btn" style="width:100%" onclick="doLogin()">Dang nhap</button>
+  <h2 id="loginTitle" style="margin-top:0;color:var(--accent)">ProxyShield v2.0 Pro</h2>
+  <p id="loginSub" style="color:var(--muted);font-size:12.5px;margin-bottom:18px">Dang nhap he thong Gateway &amp; Deep Inspector</p>
+  <div class="form-group"><label>Tai khoan Admin</label><input id="lu" placeholder="Nhap username..." value="admin"></div>
+  <div class="form-group"><label>Mat khau</label><input id="lp" type="password" placeholder="Nhap mat khau..." onkeydown="if(event.key==='Enter')doLogin()"></div>
+  <button id="loginBtn" class="btn" style="width:100%" onclick="doLogin()">Dang nhap</button>
   <div id="lerr" style="color:var(--red);margin-top:10px;font-size:12px"></div>
 </div>
 
@@ -348,11 +348,26 @@ function genRandomPass() {
   document.getElementById('sProxyPass').value = res;
 }
 
+async function checkAuthStatus() {
+  try {
+    var r = await fetch('/api/auth/status');
+    var d = await r.json();
+    var isSetup = !!d.setup_required;
+    document.getElementById('loginTitle').textContent = isSetup ? 'Tao Tai Khoan Admin Lan Dau' : 'ProxyShield v2.0 Pro';
+    document.getElementById('loginSub').textContent = isSetup ? 'Chua co tai khoan. Hay nhap User & Mat khau ban muon tao de dang nhap:' : 'Dang nhap he thong Gateway & Deep Inspector';
+    document.getElementById('loginBtn').textContent = isSetup ? 'Tao Tai Khoan & Dang Nhap' : 'Dang nhap';
+    if (isSetup && document.getElementById('lu').value === 'admin') {
+      document.getElementById('lu').value = '';
+    }
+  } catch (e) {}
+}
+
 async function api(url, opts) {
   var r = await fetch(url, opts);
   if (r.status === 401) {
     document.getElementById('appView').classList.add('hidden');
     document.getElementById('loginView').classList.remove('hidden');
+    checkAuthStatus();
     throw new Error('unauthorized');
   }
   return r;
