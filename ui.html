@@ -1,0 +1,779 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ProxyShield v2.0 Pro - Intelligent Gateway</title>
+<style>
+  :root { --bg:#090d16; --card:#111827; --card2:#0f172a; --border:#1f2937; --text:#e5e7eb; --muted:#9ca3af; --accent:#38bdf8; --green:#22c55e; --red:#ef4444; --amber:#f59e0b; }
+  * { box-sizing:border-box; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  body { margin:0; background:var(--bg); color:var(--text); font-size:13.5px; }
+  .hidden { display:none !important; }
+  .topbar { display:flex; justify-content:space-between; align-items:center; padding:10px 22px; background:var(--card2); border-bottom:1px solid var(--border); position:sticky; top:0; z-index:20; gap:10px; flex-wrap:wrap; }
+  .brand { font-weight:700; font-size:15.5px; color:var(--accent); display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .badge { padding:2px 8px; border-radius:999px; font-size:11px; font-weight:600; display:inline-block; }
+  .bg-green { background:rgba(34,197,94,0.14); color:var(--green); border:1px solid rgba(34,197,94,0.3); }
+  .bg-blue { background:rgba(56,189,248,0.14); color:var(--accent); border:1px solid rgba(56,189,248,0.3); }
+  .bg-amber { background:rgba(245,158,11,0.14); color:var(--amber); border:1px solid rgba(245,158,11,0.3); }
+  .bg-red { background:rgba(239,68,68,0.14); color:var(--red); border:1px solid rgba(239,68,68,0.3); }
+  .container { max-width:1480px; margin:0 auto; padding:16px 20px; }
+  .tabs { display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap; }
+  .tab { background:var(--card); border:1px solid var(--border); color:var(--muted); padding:8px 15px; border-radius:8px; cursor:pointer; font-weight:600; transition:0.15s; }
+  .tab:hover { color:var(--text); border-color:#374151; }
+  .tab.active { background:var(--accent); color:#090d16; border-color:var(--accent); }
+  .kpi-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(175px, 1fr)); gap:12px; margin-bottom:16px; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:15px; }
+  .kpi-label { color:var(--muted); font-size:11.5px; margin-bottom:5px; }
+  .kpi-val { font-size:20px; font-weight:700; }
+  .split-2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  @media (max-width: 960px) { .split-2 { grid-template-columns:1fr; } }
+  .btn { background:var(--accent); color:#090d16; border:none; padding:8px 14px; border-radius:6px; font-weight:600; cursor:pointer; font-size:12.5px; }
+  .btn:hover { opacity:0.9; }
+  .btn:disabled { opacity:0.5; cursor:not-allowed; }
+  .btn-sm { padding:4px 9px; font-size:11.5px; }
+  .btn-sec { background:#1f2937; color:var(--text); border:1px solid #374151; }
+  .btn-red { background:rgba(239,68,68,0.18); color:var(--red); border:1px solid rgba(239,68,68,0.4); }
+  .btn-green { background:rgba(34,197,94,0.18); color:var(--green); border:1px solid rgba(34,197,94,0.4); }
+  input, select, textarea { width:100%; background:var(--card2); border:1px solid #374151; color:var(--text); padding:8px 11px; border-radius:6px; font-size:12.5px; }
+  textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; line-height:1.45; resize:vertical; }
+  table { width:100%; border-collapse:collapse; font-size:12px; }
+  th, td { padding:8px 10px; text-align:left; border-bottom:1px solid var(--border); white-space:nowrap; }
+  th { color:var(--muted); font-weight:600; background:var(--card2); position:sticky; top:0; z-index:2; }
+  .table-wrap { overflow-x:auto; max-height:560px; border:1px solid var(--border); border-radius:8px; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px; }
+  .form-group { margin-bottom:12px; }
+  .form-group label { display:block; color:var(--muted); font-size:12px; margin-bottom:4px; }
+  .login-box { max-width:380px; margin:90px auto; background:var(--card); border:1px solid var(--border); border-radius:12px; padding:26px; }
+  .toast { position:fixed; bottom:20px; right:20px; background:var(--card2); border:1px solid var(--accent); padding:11px 16px; border-radius:8px; z-index:99; font-weight:600; box-shadow:0 8px 24px rgba(0,0,0,0.4); }
+  .prog-bar { height:8px; background:#1f2937; border-radius:999px; overflow:hidden; flex:1; min-width:140px; }
+  .prog-fill { height:100%; background:var(--green); width:0%; transition:width 0.25s; }
+  .pager { display:flex; justify-content:space-between; align-items:center; margin-top:10px; color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+
+<div id="loginView" class="login-box hidden">
+  <h2 style="margin-top:0;color:var(--accent)">ProxyShield v2.0 Pro</h2>
+  <p style="color:var(--muted);font-size:12.5px;margin-bottom:18px">Dang nhap he thong Gateway &amp; Deep Inspector</p>
+  <div class="form-group"><label>Tai khoan Admin</label><input id="lu" value="admin"></div>
+  <div class="form-group"><label>Mat khau</label><input id="lp" type="password" onkeydown="if(event.key==='Enter')doLogin()"></div>
+  <button class="btn" style="width:100%" onclick="doLogin()">Dang nhap</button>
+  <div id="lerr" style="color:var(--red);margin-top:10px;font-size:12px"></div>
+</div>
+
+<div id="appView" class="hidden">
+  <div class="topbar">
+    <div class="brand">
+      <span>ProxyShield v2.0 Pro</span>
+      <span id="pubIpBadge" class="badge bg-blue mono">Oracle IP: ...</span>
+      <span id="sysBadge" class="badge bg-green mono">RAM: ...</span>
+      <span id="connBadge" class="badge bg-blue mono">Conntrack: ...</span>
+      <span id="credBadge" class="badge bg-amber mono">Auth: ...</span>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <button class="btn btn-sec btn-sm" onclick="togglePause()" id="pauseBtn">Auto-Refresh: 2s</button>
+      <button class="btn btn-sec btn-sm" onclick="logout()">Dang xuat</button>
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="kpi-grid">
+      <div class="card"><div class="kpi-label">Cong Dang Chay (Ports)</div><div id="kPorts" class="kpi-val">0</div><div id="kHealthSub" style="font-size:11px;color:var(--muted);margin-top:3px">Alive: 0 | Dead: 0</div></div>
+      <div class="card"><div class="kpi-label">Ket Noi LIVE</div><div id="kActive" class="kpi-val" style="color:var(--accent)">0</div><div id="kRpsSub" style="font-size:11px;color:var(--muted);margin-top:3px">0.0 req/s</div></div>
+      <div class="card"><div class="kpi-label">Tong Request / Tay Trang</div><div id="kReqs" class="kpi-val">0</div><div id="kSanSub" style="font-size:11px;color:var(--green);margin-top:3px">Sanitized: 0</div></div>
+      <div class="card"><div class="kpi-label">Tong Luu Luong (Up / Down)</div><div id="kTraffic" class="kpi-val" style="font-size:16px">0 / 0</div><div id="kSpeedSub" style="font-size:11px;color:var(--muted);margin-top:3px">0 / 0 KB/s</div></div>
+      <div class="card"><div class="kpi-label">Loi Upstream / Auth</div><div id="kErr" class="kpi-val" style="color:var(--red)">0</div><div id="kLoadSub" style="font-size:11px;color:var(--muted);margin-top:3px">Load: -</div></div>
+      <div class="card" style="padding:10px 14px">
+        <div class="kpi-label">Luu luong 2 phut qua (KB/s)</div>
+        <svg id="sparkSvg" viewBox="0 0 240 46" style="width:100%;height:46px;display:block"></svg>
+      </div>
+    </div>
+
+    <div class="tabs">
+      <button class="tab active" onclick="switchTab('studio', this)">Paste &amp; Xuat Proxy (2 Chieu)</button>
+      <button class="tab" onclick="switchTab('requests', this)">Live Requests Inspector</button>
+      <button class="tab" onclick="switchTab('ports', this)">Quet &amp; Suc Khoe Cong (1000+)</button>
+      <button class="tab" onclick="switchTab('domains', this)">Domain Intelligence</button>
+      <button class="tab" onclick="switchTab('settings', this)">Tai Khoan &amp; Bo Loc DoH</button>
+    </div>
+
+    <!-- TAB 1: PASTE & XUAT PROXY STUDIO -->
+    <div id="tab-studio" class="split-2">
+      <div class="card">
+        <div class="row" style="justify-content:space-between;margin-bottom:8px">
+          <h3 style="margin:0">1. Paste Proxy Nguon (Webshare / IP-Auth)</h3>
+          <label class="btn btn-sec btn-sm" style="cursor:pointer;margin:0">
+            Tai File .txt<input type="file" accept=".txt,.list" style="display:none" onchange="uploadProxyFile(event)">
+          </label>
+        </div>
+        <div class="row">
+          <select id="defUpProto" style="max-width:210px" onchange="analyzeInputBox()">
+            <option value="socks5">Dong ko prefix -&gt; SOCKS5</option>
+            <option value="http">Dong ko prefix -&gt; HTTP</option>
+          </select>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);cursor:pointer">
+            <input type="checkbox" id="chkDedup" checked style="width:auto"> Tu loc trung khi luu
+          </label>
+          <span id="inCountBadge" class="badge bg-blue mono">0 hop le</span>
+        </div>
+        <textarea id="proxiesBox" rows="16" oninput="analyzeInputBox()" placeholder="Ho tro moi dinh dang:&#10;50.114.8.42:5432&#10;50.114.98.199:5432:user:pass&#10;socks5://user:pass@23.27.78.52:5432&#10;http://142.111.239.119:5432"></textarea>
+        <div class="row" style="margin-top:12px">
+          <button class="btn" onclick="saveProxies()">Luu &amp; Boc Proxy Ngay (Hot-Reload)</button>
+          <button class="btn btn-green" onclick="startScan('quick')">Quet Nhanh</button>
+          <button class="btn btn-sec" onclick="startScan('deep')">Quet Sau + Exit IP</button>
+          <button class="btn btn-red" onclick="removeDead()">Xoa Cong DEAD</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="row" style="justify-content:space-between;margin-bottom:8px">
+          <h3 style="margin:0">2. Xuat Proxy Da Boc Theo Yeu Cau</h3>
+          <span id="outCountBadge" class="badge bg-green mono">0 cong san sang</span>
+        </div>
+        <div class="row">
+          <select id="expPreset" style="max-width:260px" onchange="onPresetChange()">
+            <option value="socks5://{user}:{pass}@{ip}:{port}">SOCKS5 (ByteLixir): socks5://user:pass@ip:port</option>
+            <option value="http://{user}:{pass}@{ip}:{port}">HTTP: http://user:pass@ip:port</option>
+            <option value="{ip}:{port}:{user}:{pass}">ip:port:user:pass</option>
+            <option value="{user}:{pass}@{ip}:{port}">user:pass@ip:port</option>
+            <option value="custom">Tu nhap Template tuy chinh...</option>
+          </select>
+          <select id="expFilter" style="max-width:190px" onchange="refreshOutputStudio()">
+            <option value="all">Xuat tat ca cong</option>
+            <option value="alive">Chi lay proxy ALIVE</option>
+            <option value="hide_dead">Loai bo proxy DEAD</option>
+          </select>
+        </div>
+        <div id="customTmplRow" class="form-group hidden">
+          <label>Custom Template (Bien: {user}, {pass}, {ip}, {port}, {upstream}, {exit_ip})</label>
+          <input id="customTmpl" value="socks5://{user}:{pass}@{ip}:{port}" oninput="refreshOutputStudio()">
+        </div>
+        <textarea id="outputBox" rows="16" readonly placeholder="Danh sach proxy da boc se tu dong hien o day..."></textarea>
+        <div class="row" style="margin-top:12px">
+          <button class="btn" onclick="copyOutputBox()">Copy Toan Bo Output</button>
+          <button class="btn btn-sec" onclick="downloadOutputBox()">Tai Ve File .txt</button>
+          <button class="btn btn-sec" onclick="refreshOutputStudio()">Lam moi Output</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 2: LIVE REQUESTS INSPECTOR -->
+    <div id="tab-requests" class="card hidden">
+      <div class="row">
+        <input id="fq" placeholder="Tim domain, IP, upstream, loi..." style="max-width:260px" oninput="loadRequests()">
+        <select id="fact" style="max-width:175px" onchange="loadRequests()">
+          <option value="ALL">Tat ca hanh dong</option>
+          <option value="LIVE">Dang chay (LIVE)</option>
+          <option value="SANITIZED">Da tay trang (DoH IP)</option>
+          <option value="DIRECT">Giu nguyen domain</option>
+          <option value="ERR">Bi loi (ERR)</option>
+        </select>
+        <select id="fproto" style="max-width:140px" onchange="loadRequests()">
+          <option value="ALL">Moi giao thuc</option>
+          <option value="SOCKS5">SOCKS5</option>
+          <option value="HTTP">HTTP</option>
+        </select>
+        <input id="fport" placeholder="Cong (10001)" style="max-width:120px" oninput="loadRequests()">
+        <button class="btn btn-sec" onclick="exportCSV()">Tai CSV</button>
+        <button class="btn btn-red" onclick="clearLogs()">Xoa lich su</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Time</th><th>Port</th><th>Client IP</th><th>Original Target (Client gui)</th>
+              <th>Sent to Webshare</th><th>Mode</th><th>Upstream</th><th>Proto</th>
+              <th>Bytes (Up / Down)</th><th>Duration</th><th>Status / Error</th>
+            </tr>
+          </thead>
+          <tbody id="reqBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- TAB 3: PAGINATED PORTS & HEALTH SCANNER -->
+    <div id="tab-ports" class="card hidden">
+      <div class="row">
+        <input id="pq" placeholder="Tim cong, IP Webshare, Exit IP, loi..." style="max-width:240px" oninput="portPage=1;loadPorts()">
+        <select id="pfilter" style="max-width:160px" onchange="portPage=1;loadPorts()">
+          <option value="all">Tat ca cong</option>
+          <option value="alive">Chi ALIVE</option>
+          <option value="dead">Chi DEAD</option>
+          <option value="untested">Chua test</option>
+          <option value="active">Dang co ket noi</option>
+          <option value="err">Co loi</option>
+        </select>
+        <select id="psort" style="max-width:160px" onchange="portPage=1;loadPorts()">
+          <option value="port">Sap xep: So cong</option>
+          <option value="traffic">Sap xep: Luu luong</option>
+          <option value="reqs">Sap xep: Tong Req</option>
+          <option value="err">Sap xep: So loi</option>
+          <option value="latency">Sap xep: Ping cao</option>
+        </select>
+        <button class="btn btn-green" onclick="startScan('quick')">Quet Nhanh (50 luong)</button>
+        <button class="btn btn-sec" onclick="startScan('deep')">Quet Sau + Exit IP</button>
+        <button class="btn btn-red" onclick="removeDead()">Xoa Cong DEAD</button>
+        <button class="btn btn-red hidden" id="stopScanBtn" onclick="stopScan()">Dung Quet</button>
+      </div>
+      <div id="scanProgressRow" class="row hidden" style="background:var(--card2);padding:10px 14px;border-radius:8px;border:1px solid var(--border)">
+        <span id="scanText" class="mono" style="font-size:12px">Dang quet: 0 / 0</span>
+        <div class="prog-bar"><div id="scanBar" class="prog-fill"></div></div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Local Port</th><th>Upstream Proxy</th><th>Proto</th><th>Health</th><th>Ping</th>
+              <th>Exit IP (Thuc te)</th><th>Live</th><th>Reqs</th><th>Sanitized</th><th>Err</th>
+              <th>Up / Down</th><th>Last Error</th><th>Test</th>
+            </tr>
+          </thead>
+          <tbody id="portBody"></tbody>
+        </table>
+      </div>
+      <div class="pager">
+        <span id="portPagerInfo">0 cong</span>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-sec btn-sm" onclick="if(portPage>1){portPage--;loadPorts();}">&laquo; Truoc</button>
+          <span id="portPageNum" class="mono" style="padding:4px 8px">Trang 1</span>
+          <button class="btn btn-sec btn-sm" onclick="if(portPage*50<portTotal){portPage++;loadPorts();}">Sau &raquo;</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 4: DOMAIN INTELLIGENCE -->
+    <div id="tab-domains" class="card hidden">
+      <div class="row">
+        <input id="dq" placeholder="Loc ten mien hoac IP DoH..." style="max-width:250px" oninput="loadDomains()">
+        <select id="dfilter" style="max-width:190px" onchange="loadDomains()">
+          <option value="all">Moi Domain (Top 150)</option>
+          <option value="sanitized">Dang duoc Tay Trang</option>
+          <option value="direct">Chua Tay Trang (Direct)</option>
+          <option value="err">Co loi phat sinh</option>
+        </select>
+        <span style="color:var(--muted);font-size:12px">Phat hien domain la cua ByteLixir? Bam "+ Tay trang" de an khoi Webshare ngay!</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Domain</th><th>Trang thai Bo loc</th><th>IP DoH gan nhat</th><th>Luot goi</th>
+              <th>Da Tay Trang</th><th>Loi</th><th>Tong Data</th><th>Lan cuoi</th><th>Hanh dong nhanh</th>
+            </tr>
+          </thead>
+          <tbody id="domBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- TAB 5: SETTINGS & AUTH -->
+    <div id="tab-settings" class="card hidden" style="max-width:740px">
+      <h3 style="margin-top:0">Cau hinh Tai khoan Proxy &amp; Bo loc DoH</h3>
+      <div class="split-2">
+        <div class="form-group"><label>Proxy Auth Username</label><input id="sProxyUser"></div>
+        <div class="form-group">
+          <label>Proxy Auth Password</label>
+          <div style="display:flex;gap:6px">
+            <input id="sProxyPass">
+            <button class="btn btn-sec btn-sm" type="button" onclick="genRandomPass()" style="white-space:nowrap">Random</button>
+          </div>
+        </div>
+      </div>
+      <div class="form-group"><label>Cong bat dau (Start Port)</label><input id="sStartPort" type="number"></div>
+      <div class="form-group"><label>Tu khoa Domain can Tay Trang DoH (cach nhau dau phay)</label><input id="sKeywords"></div>
+      <hr style="border:0;border-top:1px solid var(--border);margin:18px 0">
+      <h4 style="margin-top:0">Doi Tai khoan / Mat khau Admin Dashboard</h4>
+      <div class="split-2">
+        <div class="form-group"><label>Admin Username</label><input id="sAdminUser"></div>
+        <div class="form-group"><label>Mat khau Admin moi (bo trong neu giu cu)</label><input id="sAdminPass" type="password"></div>
+      </div>
+      <button class="btn" onclick="saveSettings()">Luu &amp; Ap Dung Cau Hinh</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script>
+var paused = false;
+var currentTab = 'studio';
+var portPage = 1;
+var portTotal = 0;
+
+function toast(msg) {
+  var el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.remove('hidden');
+  setTimeout(function() { el.classList.add('hidden'); }, 3200);
+}
+
+function fmtBytes(b) {
+  if (!b || b <= 0) return '0 B';
+  if (b < 1024) return b + ' B';
+  if (b < 1048576) return (b / 1024).toFixed(1) + ' KB';
+  if (b < 1073741824) return (b / 1048576).toFixed(2) + ' MB';
+  return (b / 1073741824).toFixed(2) + ' GB';
+}
+
+function esc(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function isSelectingText() {
+  var sel = window.getSelection ? window.getSelection().toString() : '';
+  return sel && sel.length > 0;
+}
+
+async function copyTextSafe(txt) {
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(txt);
+    return;
+  }
+  var ta = document.createElement('textarea');
+  ta.value = txt;
+  ta.style.position = 'fixed';
+  ta.style.left = '-9999px';
+  document.body.appendChild(ta);
+  ta.focus();
+  ta.select();
+  document.execCommand('copy');
+  document.body.removeChild(ta);
+}
+
+function genRandomPass() {
+  var chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+  var res = '';
+  for (var i = 0; i < 14; i++) res += chars.charAt(Math.floor(Math.random() * chars.length));
+  document.getElementById('sProxyPass').value = res;
+}
+
+async function api(url, opts) {
+  var r = await fetch(url, opts);
+  if (r.status === 401) {
+    document.getElementById('appView').classList.add('hidden');
+    document.getElementById('loginView').classList.remove('hidden');
+    throw new Error('unauthorized');
+  }
+  return r;
+}
+
+async function doLogin() {
+  var u = document.getElementById('lu').value;
+  var p = document.getElementById('lp').value;
+  document.getElementById('lerr').textContent = '';
+  var r = await fetch('/api/login', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({username: u, password: p})
+  });
+  var d = await r.json();
+  if (!r.ok) { document.getElementById('lerr').textContent = d.error || 'Loi dang nhap'; return; }
+  initApp();
+}
+
+async function logout() {
+  await fetch('/api/logout');
+  location.reload();
+}
+
+function switchTab(name, btn) {
+  currentTab = name;
+  document.querySelectorAll('.tab').forEach(function(t){ t.classList.remove('active'); });
+  if (btn) btn.classList.add('active');
+  ['studio', 'requests', 'ports', 'domains', 'settings'].forEach(function(id) {
+    document.getElementById('tab-' + id).classList.toggle('hidden', id !== name);
+  });
+  if (name === 'studio') { loadConfig(); refreshOutputStudio(); }
+  if (name === 'settings') loadConfig();
+  if (name === 'requests') loadRequests();
+  if (name === 'ports') loadPorts();
+  if (name === 'domains') loadDomains();
+}
+
+function renderSparkline(pts) {
+  var svg = document.getElementById('sparkSvg');
+  if (!pts || pts.length < 2) { svg.innerHTML = ''; return; }
+  var maxV = 1;
+  pts.forEach(function(p) {
+    var tot = (p.up_kbps || 0) + (p.dn_kbps || 0);
+    if (tot > maxV) maxV = tot;
+  });
+  var w = 240, h = 44, step = w / (pts.length - 1);
+  var dPath = '';
+  pts.forEach(function(p, idx) {
+    var x = (idx * step).toFixed(1);
+    var tot = (p.up_kbps || 0) + (p.dn_kbps || 0);
+    var y = (h - 2 - (tot / maxV) * (h - 6)).toFixed(1);
+    dPath += (idx === 0 ? 'M' : 'L') + x + ' ' + y + ' ';
+  });
+  svg.innerHTML = '<path d="' + dPath + '" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linejoin="round"/>';
+}
+
+async function loadOverview() {
+  try {
+    var r = await api('/api/overview');
+    var d = await r.json();
+    document.getElementById('pubIpBadge').textContent = 'Oracle IP: ' + d.public_ip;
+    document.getElementById('sysBadge').textContent = 'RAM: ' + d.mem_alloc_mb.toFixed(1) + ' MB | Go: ' + d.goroutines;
+    document.getElementById('connBadge').textContent = 'Conntrack: ' + d.conntrack_cur + '/' + d.conntrack_max;
+    document.getElementById('credBadge').textContent = 'Auth: ' + d.proxy_user + ':' + d.proxy_pass;
+    document.getElementById('kPorts').textContent = d.proxy_count;
+    document.getElementById('kHealthSub').textContent = 'Alive: ' + d.alive_ports + ' | Dead: ' + d.dead_ports;
+    document.getElementById('kActive').textContent = d.active_conns;
+    document.getElementById('kReqs').textContent = d.total_reqs.toLocaleString();
+    document.getElementById('kSanSub').textContent = 'Sanitized: ' + d.total_sanitized.toLocaleString();
+    document.getElementById('kTraffic').textContent = fmtBytes(d.total_bytes_up) + ' / ' + fmtBytes(d.total_bytes_dn);
+    document.getElementById('kErr').textContent = d.total_errors.toLocaleString();
+    document.getElementById('kLoadSub').textContent = 'Load Avg: ' + (d.load_avg || '-');
+
+    var ts = d.timeseries || [];
+    if (ts.length > 0) {
+      var last = ts[ts.length - 1];
+      document.getElementById('kRpsSub').textContent = last.rps.toFixed(1) + ' req/s';
+      document.getElementById('kSpeedSub').textContent = last.up_kbps.toFixed(1) + ' / ' + last.dn_kbps.toFixed(1) + ' KB/s';
+    }
+    renderSparkline(ts);
+
+    var sc = d.scan || {};
+    var pRow = document.getElementById('scanProgressRow');
+    var stopBtn = document.getElementById('stopScanBtn');
+    if (sc.running) {
+      pRow.classList.remove('hidden');
+      stopBtn.classList.remove('hidden');
+      var pct = sc.total > 0 ? Math.round((sc.done / sc.total) * 100) : 0;
+      document.getElementById('scanText').textContent = 'Dang quet: ' + sc.done + '/' + sc.total + ' (' + pct + '%) | Alive: ' + sc.alive + ' | Dead: ' + sc.dead;
+      document.getElementById('scanBar').style.width = pct + '%';
+    } else {
+      pRow.classList.add('hidden');
+      stopBtn.classList.add('hidden');
+    }
+  } catch (e) {}
+}
+
+async function loadPorts() {
+  if (currentTab !== 'ports' || isSelectingText()) return;
+  try {
+    var qs = new URLSearchParams({
+      q: document.getElementById('pq').value,
+      filter: document.getElementById('pfilter').value,
+      sort: document.getElementById('psort').value,
+      page: String(portPage),
+      limit: '50'
+    });
+    var r = await api('/api/ports?' + qs.toString());
+    var d = await r.json();
+    portTotal = d.total || 0;
+    document.getElementById('portPagerInfo').textContent = 'Hien thi ' + (d.rows ? d.rows.length : 0) + ' / ' + portTotal + ' cong';
+    document.getElementById('portPageNum').textContent = 'Trang ' + portPage;
+    var html = '';
+    (d.rows || []).forEach(function(p) {
+      var hBadge = '<span class="badge bg-amber">Chua test</span>';
+      if (p.health === 'alive') hBadge = '<span class="badge bg-green">ALIVE</span>';
+      else if (p.health === 'dead') hBadge = '<span class="badge bg-red">DEAD</span>';
+      html += '<tr>' +
+        '<td class="mono"><b>:' + p.port + '</b></td>' +
+        '<td class="mono">' + esc(p.upstream) + '</td>' +
+        '<td>' + esc(p.proto.toUpperCase()) + '</td>' +
+        '<td>' + hBadge + '</td>' +
+        '<td class="mono">' + (p.latency_ms ? p.latency_ms + 'ms' : '-') + '</td>' +
+        '<td class="mono" style="color:var(--accent)">' + esc(p.exit_ip || '-') + '</td>' +
+        '<td class="mono">' + p.active_conns + '</td>' +
+        '<td class="mono">' + p.total_reqs + '</td>' +
+        '<td class="mono" style="color:var(--green)">' + p.sanitized_reqs + '</td>' +
+        '<td class="mono" style="color:var(--red)">' + p.error_reqs + '</td>' +
+        '<td class="mono">' + fmtBytes(p.bytes_up) + ' / ' + fmtBytes(p.bytes_down) + '</td>' +
+        '<td style="color:var(--red);max-width:220px;overflow:hidden;text-overflow:ellipsis">' + esc(p.last_err) + '</td>' +
+        '<td><button class="btn btn-sec btn-sm" onclick="testOnePort(' + p.port + ')">Test</button></td>' +
+        '</tr>';
+    });
+    document.getElementById('portBody').innerHTML = html || '<tr><td colspan="13" style="text-align:center;color:var(--muted)">Khong co du lieu phu hop.</td></tr>';
+  } catch (e) {}
+}
+
+async function testOnePort(port) {
+  toast('Dang kiem tra cong :' + port + '...');
+  var r = await api('/api/ports/test', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({port: port, mode: 'deep'})
+  });
+  var d = await r.json();
+  if (d.health === 'alive') {
+    toast('Cong :' + port + ' ALIVE (' + d.latency_ms + 'ms) - Exit IP: ' + (d.exit_ip || 'OK'));
+  } else {
+    toast('Cong :' + port + ' DEAD: ' + (d.error || 'Timeout'));
+  }
+  loadPorts();
+  loadOverview();
+}
+
+async function loadRequests() {
+  if (currentTab !== 'requests' || isSelectingText()) return;
+  try {
+    var qs = new URLSearchParams({
+      q: document.getElementById('fq').value,
+      action: document.getElementById('fact').value,
+      proto: document.getElementById('fproto').value,
+      port: document.getElementById('fport').value,
+      limit: '120'
+    });
+    var r = await api('/api/requests?' + qs.toString());
+    var d = await r.json();
+    var html = '';
+    (d.rows || []).forEach(function(row) {
+      var modeBadge = row.sanitized
+        ? '<span class="badge bg-green">SANITIZED</span>'
+        : '<span class="badge bg-blue">DIRECT</span>';
+      var stBadge = '<span class="badge bg-green">OK</span>';
+      if (row.status === 'LIVE') stBadge = '<span class="badge bg-amber">LIVE</span>';
+      else if (row.status === 'ERR') stBadge = '<span class="badge bg-red">ERR: ' + esc(row.error) + '</span>';
+      html += '<tr>' +
+        '<td class="mono" style="color:var(--muted)">' + esc(row.time) + '</td>' +
+        '<td class="mono"><b>:' + row.port + '</b></td>' +
+        '<td class="mono">' + esc(row.client_ip) + '</td>' +
+        '<td class="mono">' + esc(row.orig_target) + '</td>' +
+        '<td class="mono" style="color:' + (row.sanitized ? 'var(--green)' : 'var(--text)') + '">' + esc(row.sent_target) + '</td>' +
+        '<td>' + modeBadge + '</td>' +
+        '<td class="mono">' + esc(row.upstream) + '</td>' +
+        '<td>' + esc(row.protocol) + '</td>' +
+        '<td class="mono">' + (row.status === 'LIVE' ? 'streaming...' : fmtBytes(row.bytes_up) + ' / ' + fmtBytes(row.bytes_down)) + '</td>' +
+        '<td class="mono">' + (row.duration_ms < 1000 ? row.duration_ms + 'ms' : (row.duration_ms / 1000).toFixed(2) + 's') + '</td>' +
+        '<td>' + stBadge + '</td>' +
+        '</tr>';
+    });
+    document.getElementById('reqBody').innerHTML = html || '<tr><td colspan="11" style="text-align:center;color:var(--muted)">Chua co request nao.</td></tr>';
+  } catch (e) {}
+}
+
+async function loadDomains() {
+  if (currentTab !== 'domains' || isSelectingText()) return;
+  try {
+    var qs = new URLSearchParams({
+      q: document.getElementById('dq').value,
+      filter: document.getElementById('dfilter').value
+    });
+    var r = await api('/api/domains?' + qs.toString());
+    var d = await r.json();
+    var html = '';
+    (d.rows || []).forEach(function(row) {
+      var st = row.is_targeted
+        ? '<span class="badge bg-green">DANG TAY TRANG</span>'
+        : '<span class="badge bg-blue">DIRECT</span>';
+      var btn = row.is_targeted
+        ? '<span style="color:var(--muted);font-size:11px">Da bao ve</span>'
+        : '<button class="btn btn-green btn-sm" onclick="quickSanitize(\'' + esc(row.domain) + '\')">+ Tay trang</button>';
+      html += '<tr>' +
+        '<td class="mono"><b>' + esc(row.domain) + '</b></td>' +
+        '<td>' + st + '</td>' +
+        '<td class="mono" style="color:var(--accent)">' + esc(row.resolved_ip || '-') + '</td>' +
+        '<td class="mono">' + row.hits + '</td>' +
+        '<td class="mono" style="color:var(--green)">' + row.sanitized + '</td>' +
+        '<td class="mono" style="color:var(--red)">' + row.errors + '</td>' +
+        '<td class="mono">' + fmtBytes(row.bytes) + '</td>' +
+        '<td class="mono" style="color:var(--muted)">' + esc(row.last_seen) + '</td>' +
+        '<td>' + btn + '</td>' +
+        '</tr>';
+    });
+    document.getElementById('domBody').innerHTML = html || '<tr><td colspan="9" style="text-align:center;color:var(--muted)">Chua co du lieu domain.</td></tr>';
+  } catch (e) {}
+}
+
+async function quickSanitize(domain) {
+  var parts = domain.split('.');
+  var kw = parts.length >= 2 ? parts.slice(-2).join('.') : domain;
+  await api('/api/domains/sanitize', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({keyword: kw})
+  });
+  toast('Da them "' + kw + '" vao bo loc tay trang DoH!');
+  loadDomains();
+  loadConfig();
+}
+
+function analyzeInputBox() {
+  var raw = document.getElementById('proxiesBox').value;
+  var lines = raw.split(/\r?\n/);
+  var valid = 0;
+  lines.forEach(function(l) {
+    l = l.trim();
+    if (!l || l.charAt(0) === '#') return;
+    if (l.indexOf(':') !== -1) valid++;
+  });
+  document.getElementById('inCountBadge').textContent = valid + ' dong hop le';
+}
+
+function uploadProxyFile(ev) {
+  var f = ev.target.files[0];
+  if (!f) return;
+  var rd = new FileReader();
+  rd.onload = function(e) {
+    document.getElementById('proxiesBox').value = e.target.result || '';
+    analyzeInputBox();
+    toast('Da nap file ' + f.name + '. Bam "Luu & Boc Proxy Ngay" de ap dung!');
+  };
+  rd.readAsText(f);
+}
+
+async function loadConfig() {
+  try {
+    var r = await api('/api/config');
+    var c = await r.json();
+    document.getElementById('proxiesBox').value = c.proxies_raw || '';
+    document.getElementById('defUpProto').value = c.default_up_proto || 'socks5';
+    document.getElementById('sProxyUser').value = c.proxy_user || '';
+    document.getElementById('sProxyPass').value = c.proxy_pass || '';
+    document.getElementById('sStartPort').value = c.start_port || 10001;
+    document.getElementById('sKeywords').value = c.sanitize_keywords || '';
+    document.getElementById('sAdminUser').value = c.admin_user || 'admin';
+    document.getElementById('sAdminPass').value = '';
+    analyzeInputBox();
+  } catch (e) {}
+}
+
+function getExportTemplate() {
+  var p = document.getElementById('expPreset').value;
+  if (p === 'custom') return document.getElementById('customTmpl').value;
+  return p;
+}
+
+function onPresetChange() {
+  var p = document.getElementById('expPreset').value;
+  document.getElementById('customTmplRow').classList.toggle('hidden', p !== 'custom');
+  refreshOutputStudio();
+}
+
+async function refreshOutputStudio() {
+  try {
+    var tmpl = getExportTemplate();
+    var filter = document.getElementById('expFilter').value;
+    var qs = new URLSearchParams({tmpl: tmpl, filter: filter});
+    var r = await api('/api/export?' + qs.toString());
+    var txt = await r.text();
+    document.getElementById('outputBox').value = txt;
+    var cnt = txt.trim() === '' ? 0 : txt.trim().split('\n').length;
+    document.getElementById('outCountBadge').textContent = cnt + ' cong san sang';
+  } catch (e) {}
+}
+
+async function copyOutputBox() {
+  var txt = document.getElementById('outputBox').value.trim();
+  if (!txt) { toast('Chua co proxy nao de copy!'); return; }
+  await copyTextSafe(txt);
+  toast('Da copy ' + txt.split('\n').length + ' proxy vao Clipboard!');
+}
+
+function downloadOutputBox() {
+  var qs = new URLSearchParams({
+    tmpl: getExportTemplate(),
+    filter: document.getElementById('expFilter').value,
+    dl: '1'
+  });
+  window.location = '/api/export?' + qs.toString();
+}
+
+async function saveProxies() {
+  var r = await api('/api/proxies/save', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      proxies_raw: document.getElementById('proxiesBox').value,
+      default_up_proto: document.getElementById('defUpProto').value,
+      dedup: document.getElementById('chkDedup').checked
+    })
+  });
+  var d = await r.json();
+  if (d.cleaned_raw !== undefined) {
+    document.getElementById('proxiesBox').value = d.cleaned_raw;
+    analyzeInputBox();
+  }
+  toast('Da boc ' + d.active_ports + ' cong! (Loc trung: ' + (d.dupes||0) + ', Loi cu phap: ' + (d.invalid||0) + ')');
+  loadOverview();
+  refreshOutputStudio();
+}
+
+async function removeDead() {
+  var r = await api('/api/proxies/remove-dead', {method: 'POST'});
+  var d = await r.json();
+  document.getElementById('proxiesBox').value = d.cleaned_raw || '';
+  analyzeInputBox();
+  toast('Da xoa ' + d.removed + ' cong DEAD! Con lai ' + d.active_ports + ' cong.');
+  loadOverview();
+  loadPorts();
+  refreshOutputStudio();
+}
+
+async function saveSettings() {
+  var r = await api('/api/settings/save', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      proxy_user: document.getElementById('sProxyUser').value,
+      proxy_pass: document.getElementById('sProxyPass').value,
+      start_port: parseInt(document.getElementById('sStartPort').value, 10),
+      sanitize_keywords: document.getElementById('sKeywords').value,
+      new_admin_user: document.getElementById('sAdminUser').value,
+      new_admin_pass: document.getElementById('sAdminPass').value
+    })
+  });
+  var d = await r.json();
+  if (!r.ok) { toast(d.error || 'Loi luu cau hinh'); return; }
+  toast('Da luu & cap nhat ' + d.active_ports + ' cong!');
+  loadOverview();
+  refreshOutputStudio();
+}
+
+async function startScan(mode) {
+  await api('/api/scan/start', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({mode: mode})
+  });
+  toast('Bat dau quet ' + (mode === 'deep' ? 'Sau + Check Exit IP' : 'Nhanh') + '...');
+  loadOverview();
+}
+
+async function stopScan() {
+  await api('/api/scan/stop', {method: 'POST'});
+  toast('Dang dung quet...');
+}
+
+function exportCSV() {
+  var qs = new URLSearchParams({
+    q: document.getElementById('fq').value,
+    action: document.getElementById('fact').value,
+    proto: document.getElementById('fproto').value,
+    port: document.getElementById('fport').value
+  });
+  window.location = '/api/requests/csv?' + qs.toString();
+}
+
+async function clearLogs() {
+  await api('/api/requests/clear', {method: 'POST'});
+  loadRequests();
+  toast('Da xoa lich su request!');
+}
+
+function togglePause() {
+  paused = !paused;
+  document.getElementById('pauseBtn').textContent = paused ? 'Tam dung' : 'Auto-Refresh: 2s';
+}
+
+async function initApp() {
+  try {
+    await loadOverview();
+    document.getElementById('loginView').classList.add('hidden');
+    document.getElementById('appView').classList.remove('hidden');
+    await loadConfig();
+    await refreshOutputStudio();
+  } catch (e) {}
+}
+
+setInterval(function() {
+  if (!paused && !document.getElementById('appView').classList.contains('hidden')) {
+    loadOverview();
+    if (currentTab === 'requests') loadRequests();
+    if (currentTab === 'ports') loadPorts();
+    if (currentTab === 'domains') loadDomains();
+  }
+}, 2000);
+
+initApp();
+</script>
+</body>
+</html>
