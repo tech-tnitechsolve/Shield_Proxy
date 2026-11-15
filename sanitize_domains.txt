@@ -1,0 +1,45 @@
+# ==============================================================================
+# Danh sach tu khoa / ten mien can AN khoi Proxy Nguon (Tự dong cap nhat hot-reload)
+# Moi dong 1 tu khoa (khong phan biet hoa thuong). Dong # la ghi chu.
+# ==============================================================================
+
+# --- ByteLixir & he thong broker ---
+bytelixir
+bylxr
+brightnetip
+
+# --- Cac app Bandwidth Sharing pho bien ---
+pawns
+iproyal
+honeygain
+earnapp
+luminati
+brightdata
+packetstream
+packetshare
+traffmonetizer
+repocket
+earnfm
+peer2profit
+proxylite
+proxyrack
+proxybase
+antgain
+wizardgain
+packetsdk
+castarsdk
+wipter
+cloudcollab
+
+# --- DePIN & Browser Nodes ---
+mysterium
+mystnodes
+urnetwork
+bringyour
+titannet
+getgrass
+gradient
+nodepay
+uprock
+ebesucher
+adnade

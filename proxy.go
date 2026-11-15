@@ -445,9 +445,9 @@ func handleSOCKS5(clientConn net.Conn, br *bufio.Reader, pr *PortRunner, up Upst
 	}
 	targetPort := uint16(portB[0])<<8 | uint16(portB[1])
 
-	if isPrivateOrReserved(origHost) {
+	if isPrivateOrReserved(origHost) || strings.HasPrefix(strings.ToLower(origHost), "ipv6.") {
 		_, _ = clientConn.Write([]byte{0x05, 0x02, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
-		pr.SetError("private IP blocked")
+		pr.SetError("private/ipv6 probe blocked")
 		return
 	}
 
@@ -456,16 +456,20 @@ func handleSOCKS5(clientConn net.Conn, br *bufio.Reader, pr *PortRunner, up Upst
 	sentHost := origHost
 	sanitized := false
 	if needsSanitize(origHost) {
-		if ipStr, err := resolveDoH(origHost); err == nil && ipStr != "" {
-			if isPrivateOrReserved(ipStr) {
-				_, _ = clientConn.Write([]byte{0x05, 0x02, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
-				pr.SetError("resolved private IP blocked")
-				return
-			}
-			sentHost = ipStr
-			sanitized = true
-			atomic.AddInt64(&pr.SanitizedReqs, 1)
+		ipStr, err := resolveDoH(origHost)
+		if err != nil || ipStr == "" {
+			_, _ = clientConn.Write([]byte{0x05, 0x01, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
+			pr.SetError("anti-leak blocked: " + origHost)
+			return
 		}
+		if isPrivateOrReserved(ipStr) {
+			_, _ = clientConn.Write([]byte{0x05, 0x02, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
+			pr.SetError("resolved private IP blocked")
+			return
+		}
+		sentHost = ipStr
+		sanitized = true
+		atomic.AddInt64(&pr.SanitizedReqs, 1)
 	}
 
 	portStr := strconv.Itoa(int(targetPort))
@@ -552,9 +556,9 @@ func handleHTTP(clientConn net.Conn, br *bufio.Reader, pr *PortRunner, up Upstre
 		return
 	}
 
-	if isPrivateOrReserved(origHost) {
+	if isPrivateOrReserved(origHost) || strings.HasPrefix(strings.ToLower(origHost), "ipv6.") {
 		_, _ = clientConn.Write([]byte("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n"))
-		pr.SetError("private/ipv6 blocked")
+		pr.SetError("private/ipv6 probe blocked")
 		return
 	}
 
@@ -562,15 +566,19 @@ func handleHTTP(clientConn net.Conn, br *bufio.Reader, pr *PortRunner, up Upstre
 	sentHost := origHost
 	sanitized := false
 	if needsSanitize(origHost) {
-		if ipStr, err := resolveDoH(origHost); err == nil && ipStr != "" {
-			if isPrivateOrReserved(ipStr) {
-				_, _ = clientConn.Write([]byte("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n"))
-				return
-			}
-			sentHost = ipStr
-			sanitized = true
-			atomic.AddInt64(&pr.SanitizedReqs, 1)
+		ipStr, err := resolveDoH(origHost)
+		if err != nil || ipStr == "" {
+			_, _ = clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n"))
+			pr.SetError("anti-leak blocked: " + origHost)
+			return
 		}
+		if isPrivateOrReserved(ipStr) {
+			_, _ = clientConn.Write([]byte("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n"))
+			return
+		}
+		sentHost = ipStr
+		sanitized = true
+		atomic.AddInt64(&pr.SanitizedReqs, 1)
 	}
 
 	protoLabel := "HTTP-CONNECT"

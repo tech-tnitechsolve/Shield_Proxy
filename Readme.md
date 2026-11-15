@@ -1,4 +1,4 @@
-# Lệnh cài đặt 1 dòng (Xóa sạch cache GitHub ngay khi vừa Push)
+# 1. Lệnh cài đặt 1 dòng (Xóa sạch cache GitHub ngay khi vừa Push)
 ```
 SHA=$(curl -4 -sSL -H "Accept: application/vnd.github.sha" -H "Cache-Control: no-cache" "https://api.github.com/repos/tech-tnitechsolve/Shield_Proxy/commits/main?t=$(date +%s)" 2>/dev/null) && [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || SHA="main"; curl -4 -sSL -H "Cache-Control: no-cache" "https://raw.githubusercontent.com/tech-tnitechsolve/Shield_Proxy/${SHA}/install.sh?t=$(date +%s)" | tr -d '\r' | sudo bash
 ```
@@ -6,7 +6,11 @@ SHA=$(curl -4 -sSL -H "Accept: application/vnd.github.sha" -H "Cache-Control: no
 ```
 sudo ps-update
 ```
-
+# 2. Lệnh xóa sạch hết 100% (nếu không muốn dùng nữa)
+```
+sudo bash -c 'systemctl disable --now proxy-shield 2>/dev/null || true; rm -rf /etc/systemd/system/proxy-shield.service /usr/local/bin/proxy-shield /usr/local/bin/ps-health /usr/local/bin/ps-update /usr/local/bin/ps-cli /usr/local/bin/ps-firewall.sh /etc/cron.d/proxy-shield-backup /etc/sysctl.d/99-proxyshield.conf /etc/systemd/journald.conf.d/99-proxyshield.conf /etc/security/limits.d/99-proxyshield.conf /opt/proxy-shield-src /var/lib/proxy-shield /var/backups/proxy-shield /root/wrapped_proxies*.txt; systemctl daemon-reload; sysctl --system >/dev/null 2>&1 || true; echo "[OK] Da xoa sach 100% ProxyShield khoi VPS!"'
+```
+---------------------------------------------------------------------------
 # Nếu Dùng Oracle thì phải mở Shell rồi đẩy code sau:
 ```
 SL_ID="ocid1.securitylist.oc1.ca-toronto-1.aaaaaaaafph42mmfltv7z5thae2n2ul4jo4nz7mkgspifzytjbgqmdi7b6gq"

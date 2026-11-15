@@ -2,10 +2,8 @@
 set -euo pipefail
 export PATH="/usr/local/go/bin:$PATH"
 
-# ==================== CAU HINH REPO MAC DINH ====================
 GITHUB_REPO="tech-tnitechsolve/Shield_Proxy"
 GITHUB_BRANCH="main"
-# ================================================================
 
 DASH_PORT="8888"
 START_PORT="10001"
@@ -21,21 +19,21 @@ while [[ $# -gt 0 ]]; do
     --admin-user)  INIT_ADMIN_USER="${2:-admin}"; shift 2 ;;
     --admin-pass)  INIT_ADMIN_PASS="${2:-}"; shift 2 ;;
     --uninstall)
-      echo "[*] Dang go bo ProxyShield Pro..."
+      echo "[*] Dang go bo ProxyShield Pro (giu lai data cau hinh)..."
       systemctl disable --now proxy-shield 2>/dev/null || true
-      rm -f /etc/systemd/system/proxy-shield.service \
-            /usr/local/bin/proxy-shield \
-            /usr/local/bin/ps-health \
-            /usr/local/bin/ps-update \
-            /usr/local/bin/ps-cli \
-            /usr/local/bin/ps-firewall.sh \
-            /etc/cron.d/proxy-shield-backup \
-            /etc/sysctl.d/99-proxyshield.conf \
-            /etc/systemd/journald.conf.d/99-proxyshield.conf \
-            /etc/security/limits.d/99-proxyshield.conf
+      rm -f /etc/systemd/system/proxy-shield.service /usr/local/bin/proxy-shield* /usr/local/bin/ps-health /usr/local/bin/ps-update /usr/local/bin/ps-cli /usr/local/bin/ps-firewall.sh /etc/cron.d/proxy-shield-backup /etc/sysctl.d/99-proxyshield.conf /etc/systemd/journald.conf.d/99-proxyshield.conf /etc/security/limits.d/99-proxyshield.conf
       rm -rf /opt/proxy-shield-src
       systemctl daemon-reload
-      echo "[+] Da go bo sach se (cau hinh tai /var/lib/proxy-shield van duoc giu lai)."
+      echo "[+] Da go bo xong (cau hinh tai /var/lib/proxy-shield van duoc giu lai)."
+      exit 0
+      ;;
+    --purge)
+      echo "[*] Dang xoa sach 100% ProxyShield & toan bo du lieu..."
+      systemctl disable --now proxy-shield 2>/dev/null || true
+      rm -rf /etc/systemd/system/proxy-shield.service /usr/local/bin/proxy-shield* /usr/local/bin/ps-health /usr/local/bin/ps-update /usr/local/bin/ps-cli /usr/local/bin/ps-firewall.sh /etc/cron.d/proxy-shield-backup /etc/sysctl.d/99-proxyshield.conf /etc/systemd/journald.conf.d/99-proxyshield.conf /etc/security/limits.d/99-proxyshield.conf /opt/proxy-shield-src /var/lib/proxy-shield /var/backups/proxy-shield /root/wrapped_proxies*.txt
+      systemctl daemon-reload
+      sysctl --system >/dev/null 2>&1 || true
+      echo "[+] Da xoa sach khong con dau vet!"
       exit 0
       ;;
     *) echo "[!] Tham so khong hop le: $1"; exit 1 ;;
@@ -43,7 +41,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ $EUID -eq 0 ]] || { echo "[!] Vui long chay bang quyen root: sudo bash ..."; exit 1; }
-command -v apt-get >/dev/null 2>&1 || { echo "[!] Script ho tro Ubuntu/Debian (apt-get)."; exit 1; }
+command -v apt-get >/dev/null 2>&1 || { echo "[!] Script ho tro Ubuntu/Debian."; exit 1; }
 
 SRC_DIR="/opt/proxy-shield-src"
 DATA_DIR="/var/lib/proxy-shield"
@@ -52,7 +50,7 @@ SVC_PATH="/etc/systemd/system/proxy-shield.service"
 IS_FRESH=0
 [[ ! -f "${DATA_DIR}/config.json" ]] && IS_FRESH=1
 
-echo "[*] 1/7. Cai dat goi phu thuoc, Chrony & cong cu giam sat..."
+echo "[*] 1/7. Kiem tra goi phu thuoc & Go compiler..."
 export DEBIAN_FRONTEND=noninteractive
 apt-get -o DPkg::Lock::Timeout=60 update -y -qq
 apt-get -o DPkg::Lock::Timeout=60 install -y -qq --no-install-recommends \
@@ -61,7 +59,6 @@ apt-get -o DPkg::Lock::Timeout=60 install -y -qq --no-install-recommends \
 systemctl enable --now chrony >/dev/null 2>&1 || true
 systemctl disable --now snapd snapd.socket >/dev/null 2>&1 || true
 
-# Dam bao Go >= 1.18
 NEED_GO=0
 if ! command -v go >/dev/null 2>&1; then
   NEED_GO=1
@@ -81,15 +78,15 @@ if (( NEED_GO == 1 )); then
       *) echo "[!] Kien truc CPU khong ho tro: $ARCH"; exit 1 ;;
     esac
     GO_VER=$(curl -fsSL "https://go.dev/VERSION?m=text" 2>/dev/null | head -n1 || echo "go1.23.6")
-    echo "[*] Dang tai Go chinh thuc (${GO_VER}-${GO_ARCH})..."
     curl -4 -fsSL "https://go.dev/dl/${GO_VER}.linux-${GO_ARCH}.tar.gz" -o /tmp/go.tar.gz
     rm -rf /usr/local/go && tar -C /usr/local -xzf /tmp/go.tar.gz && rm -f /tmp/go.tar.gz
     export PATH="/usr/local/go/bin:$PATH"
   fi
 fi
 
-echo "[*] 2/7. Xoa cache & tai ma nguon moi nhat tu GitHub..."
-rm -rf "$SRC_DIR" && mkdir -p "$SRC_DIR" "$DATA_DIR"
+echo "[*] 2/7. Tai ma nguon moi nhat vao vung tam (chua cham vao proxy dang chay)..."
+TMP_SRC="/tmp/proxyshield-src-build"
+rm -rf "$TMP_SRC" && mkdir -p "$TMP_SRC" "$DATA_DIR" /var/backups/proxy-shield
 
 LOCAL_SCRIPT="${BASH_SOURCE[0]:-}"
 SCRIPT_DIR=""
@@ -97,9 +94,9 @@ if [[ -n "$LOCAL_SCRIPT" && -f "$LOCAL_SCRIPT" ]]; then
   SCRIPT_DIR="$(cd "$(dirname "$LOCAL_SCRIPT")" && pwd)"
 fi
 
-if [[ -n "$SCRIPT_DIR" && -f "$SCRIPT_DIR/go.mod" && -f "$SCRIPT_DIR/main.go" && -f "$SCRIPT_DIR/ui.html" ]]; then
+if [[ -n "$SCRIPT_DIR" && -f "$SCRIPT_DIR/go.mod" && -f "$SCRIPT_DIR/main.go" && -f "$SCRIPT_DIR/ui.html" && -f "$SCRIPT_DIR/sanitize_domains.txt" ]]; then
   echo "[*] Build tu thu muc local: $SCRIPT_DIR"
-  cp -f "$SCRIPT_DIR"/*.go "$SCRIPT_DIR/go.mod" "$SCRIPT_DIR/ui.html" "$SRC_DIR/"
+  cp -f "$SCRIPT_DIR"/*.go "$SCRIPT_DIR/go.mod" "$SCRIPT_DIR/ui.html" "$SCRIPT_DIR/sanitize_domains.txt" "$TMP_SRC/"
 else
   LATEST_SHA=$(curl -4 -fsSL -H "Accept: application/vnd.github.sha" -H "Cache-Control: no-cache" \
     "https://api.github.com/repos/${GITHUB_REPO}/commits/${GITHUB_BRANCH}?t=$(date +%s)" 2>/dev/null || echo "")
@@ -109,24 +106,28 @@ else
   rm -rf "$TMP_TAR" "$TMP_EXT" && mkdir -p "$TMP_EXT"
 
   if [[ "$LATEST_SHA" =~ ^[0-9a-f]{40}$ ]]; then
-    echo "[*] Bat duoc Commit moi nhat: ${LATEST_SHA:0:7} (Bypass cache GitHub thanh cong)"
+    echo "[*] Bat duoc Commit moi nhat: ${LATEST_SHA:0:7}"
     TAR_URL="https://github.com/${GITHUB_REPO}/archive/${LATEST_SHA}.tar.gz"
   else
-    echo "[*] Tai truc tiep nhanh ${GITHUB_BRANCH} (No-cache query)..."
     TAR_URL="https://github.com/${GITHUB_REPO}/archive/refs/heads/${GITHUB_BRANCH}.tar.gz?t=$(date +%s)"
   fi
 
   curl -4 -fsSL -H "Cache-Control: no-cache" "$TAR_URL" -o "$TMP_TAR"
   tar -xzf "$TMP_TAR" -C "$TMP_EXT" --strip-components=1
-  cp -f "$TMP_EXT"/*.go "$TMP_EXT/go.mod" "$TMP_EXT/ui.html" "$SRC_DIR/"
+  cp -f "$TMP_EXT"/*.go "$TMP_EXT/go.mod" "$TMP_EXT/ui.html" "$TMP_EXT/sanitize_domains.txt" "$TMP_SRC/"
   rm -rf "$TMP_TAR" "$TMP_EXT"
 fi
 
-echo "[*] 3/7. Bien dich sach binary Go native (CGO_ENABLED=0, rebuild -a)..."
-(cd "$SRC_DIR" && CGO_ENABLED=0 go build -a -ldflags="-s -w" -o "$BIN_PATH" .)
-chmod +x "$BIN_PATH"
+echo "[*] 3/7. Bien dich thu sang ${BIN_PATH}.new (proxy hien tai van chay binh thuong)..."
+if ! (cd "$TMP_SRC" && CGO_ENABLED=0 go build -a -ldflags="-s -w" -o "${BIN_PATH}.new" .); then
+  echo "[XX] LOI BIEN DICH! Huy cap nhat -> Dich vu proxy cu van dang chay an toan 100%."
+  rm -rf "$TMP_SRC" "${BIN_PATH}.new"
+  exit 1
+fi
+chmod +x "${BIN_PATH}.new"
+rm -rf "$SRC_DIR" && mv "$TMP_SRC" "$SRC_DIR"
 
-echo "[*] 4/7. Toi uu Kernel, Journald (10M), Nofile Limits (1M)..."
+echo "[*] 4/7. Toi uu Kernel, Journald (10M), Limits (1M)..."
 END_PORT=$(( START_PORT + 2500 ))
 modprobe nf_conntrack 2>/dev/null || true
 modprobe tcp_bbr 2>/dev/null || true
@@ -169,7 +170,7 @@ root soft nofile 1048576
 root hard nofile 1048576
 EOF
 
-echo "[*] 5/7. Cau hinh Firewall Ubuntu & tu dong go REJECT Oracle..."
+echo "[*] 5/7. Cau hinh Firewall Ubuntu..."
 cat << EOF > /usr/local/bin/ps-firewall.sh
 #!/usr/bin/env bash
 if command -v iptables >/dev/null 2>&1; then
@@ -190,24 +191,7 @@ chmod +x /usr/local/bin/ps-firewall.sh
 /usr/local/bin/ps-firewall.sh
 if command -v netfilter-persistent >/dev/null 2>&1; then netfilter-persistent save >/dev/null 2>&1 || true; fi
 
-# Neu VPS co san oci CLI + ~/.oci/config thi tu mo VCN Security List luon
-OCI_CFG=""
-for p in /root/.oci/config /home/ubuntu/.oci/config; do [[ -f "$p" ]] && OCI_CFG="$p" && break; done
-if command -v oci >/dev/null 2>&1 && command -v jq >/dev/null 2>&1 && [[ -n "$OCI_CFG" ]]; then
-  echo "[*] Phat hien OCI CLI config -> Tu dong mo port tren Oracle VCN Security List..."
-  TENANCY_OCID=$(awk -F= '/^tenancy=/{print $2}' "$OCI_CFG" | tr -d ' \r' | head -n1)
-  if [[ -n "$TENANCY_OCID" ]]; then
-    NEW_RULES="[{\"source\":\"0.0.0.0/0\",\"source-type\":\"CIDR_BLOCK\",\"protocol\":\"6\",\"is-stateless\":false,\"description\":\"ProxyShield-UI\",\"tcp-options\":{\"destination-port-range\":{\"min\":${DASH_PORT},\"max\":${DASH_PORT}}}},{\"source\":\"0.0.0.0/0\",\"source-type\":\"CIDR_BLOCK\",\"protocol\":\"6\",\"is-stateless\":false,\"description\":\"ProxyShield-Ports\",\"tcp-options\":{\"destination-port-range\":{\"min\":${START_PORT},\"max\":${END_PORT}}}}]"
-    for SL_ID in $(OCI_CLI_CONFIG_FILE="$OCI_CFG" oci network security-list list --compartment-id "$TENANCY_OCID" --query 'data[].id' --raw-output 2>/dev/null | jq -r '.[]' 2>/dev/null); do
-      CUR=$(OCI_CLI_CONFIG_FILE="$OCI_CFG" oci network security-list get --security-list-id "$SL_ID" --query 'data."ingress-security-rules"' --raw-output 2>/dev/null || echo "[]")
-      MERGED=$(jq -c --argjson cur "$CUR" --argjson add "$NEW_RULES" '($cur | map(select(.description != "ProxyShield-UI" and .description != "ProxyShield-Ports"))) + $add')
-      OCI_CLI_CONFIG_FILE="$OCI_CFG" oci network security-list update --security-list-id "$SL_ID" --ingress-security-rules "$MERGED" --force >/dev/null 2>&1 || true
-    done
-  fi
-fi
-
 echo "[*] 6/7. Cai dat Auto-Backup, 'ps-health', 'ps-update' va 'ps-cli'..."
-mkdir -p /var/backups/proxy-shield
 cat << 'EOF' > /etc/cron.d/proxy-shield-backup
 0 3 * * * root cp -f /var/lib/proxy-shield/config.json /var/backups/proxy-shield/config.$(date +\%F).json && find /var/backups/proxy-shield -name "config.*.json" -mtime +7 -delete
 EOF
@@ -243,7 +227,7 @@ set -euo pipefail
 SHA=\$(curl -4 -sSL -H "Accept: application/vnd.github.sha" -H "Cache-Control: no-cache" "https://api.github.com/repos/${GITHUB_REPO}/commits/${GITHUB_BRANCH}?t=\$(date +%s)" 2>/dev/null || echo "")
 REF="${GITHUB_BRANCH}"
 [[ "\$SHA" =~ ^[0-9a-f]{40}\$ ]] && REF="\$SHA"
-echo "[*] Dang cap nhat tu commit: \${REF}"
+echo "[*] Dang kiem tra & cap nhat tu commit: \${REF}"
 curl -4 -sSL -H "Cache-Control: no-cache" "https://raw.githubusercontent.com/${GITHUB_REPO}/\${REF}/install.sh?t=\$(date +%s)" | tr -d '\r' | bash -s -- --repo "${GITHUB_REPO}" --branch "${GITHUB_BRANCH}" --dash-port "${DASH_PORT}" --start-port "${START_PORT}"
 EOF
 chmod +x /usr/local/bin/ps-update
@@ -256,7 +240,7 @@ CFG_PATH = "/var/lib/proxy-shield/config.json"
 
 def load_cfg():
     if not os.path.exists(CFG_PATH):
-        sys.exit("Chua thay config.json. Hay chay systemctl start proxy-shield truoc!")
+        sys.exit("Chua thay config.json!")
     with open(CFG_PATH, "r", encoding="utf-8") as f:
         return json.load(f)
 
@@ -273,36 +257,36 @@ def pub_ip():
         return "YOUR_VPS_IP"
 
 def usage():
-    print("""Cach dung ps-cli (Dieu khien ProxyShield 100% bang Terminal):
-  sudo ps-cli info                            -> Xem thong tin cau hinh & so luong proxy
-  sudo ps-cli diag                            -> Chan doan cong 8888 / tuong lua Oracle VCN
-  sudo ps-cli set-admin <user> <pass>         -> Dat/doi tai khoan Admin Dashboard
-  sudo ps-cli set-auth <user> <pass>          -> Dat/doi Username:Password cho Proxy
-  sudo ps-cli load <file_proxies.txt> [proto] -> Nap list proxy Webshare (proto: socks5|http)
-  sudo ps-cli export [socks5|http]            -> Xuat toan bo list proxy da boc ra man hinh
-  sudo ps-cli test [port]                     -> Test ket noi qua cong (mac dinh 10001)""")
+    print("""Cach dung ps-cli:
+  sudo ps-cli info                            -> Xem thong tin & so proxy
+  sudo ps-cli sync-rules                      -> Dong bo list domain an tu GitHub vao RAM (0ms rot mang)
+  sudo ps-cli diag                            -> Chan doan cong 8888 / tuong lua
+  sudo ps-cli set-admin <user> <pass>         -> Dat/doi tai khoan Admin
+  sudo ps-cli set-auth <user> <pass>          -> Dat/doi Proxy Auth
+  sudo ps-cli load <file_proxies.txt> [proto] -> Nap list proxy nguon
+  sudo ps-cli export                          -> Xuat list proxy da boc (1:1 giao thuc)
+  sudo ps-cli test [port]                     -> Test ket noi cong""")
 
 if len(sys.argv) < 2:
     usage(); sys.exit(0)
 
 cmd = sys.argv[1]
+if cmd == "sync-rules":
+    subprocess.run(["pkill", "-USR1", "-x", "proxy-shield"], check=True)
+    print("[OK] Da kich hoat dong bo sanitize_domains.txt vao RAM (0ms gian doan proxy)!")
+    sys.exit(0)
+
 if cmd == "diag":
     ip = pub_ip()
-    print("=== CHAN DOAN KET NOI DASHBOARD & PROXY ===")
     try:
         res = urllib.request.urlopen("http://127.0.0.1:8888/api/auth/status", timeout=3).read().decode()
-        print(f"[OK] Web Dashboard noi bo (127.0.0.1:8888): DANG CHAY ({res.strip()})")
+        print(f"[OK] Dashboard (127.0.0.1:8888): DANG CHAY ({res.strip()})")
     except Exception as e:
-        print(f"[XX] Web Dashboard noi bo KHONG phan hoi: {e}")
-    print("[*] Kiem tra cong lang nghe (ss -tln):")
+        print(f"[XX] Dashboard loi: {e}")
     subprocess.run("ss -tln | grep -E ':8888|:10001'", shell=True)
-    print("\n[*] Neu vao http://" + ip + ":8888 bi ERR_CONNECTION_TIMED_OUT:")
-    print("    1) Dung SSH Tunnel ngay khong can mo Oracle: ssh -N -L 8888:127.0.0.1:8888 ubuntu@" + ip)
-    print("    2) Hoac mo VCN trong OCI Cloud Shell (>_) bang 1 lenh tu dong.")
     sys.exit(0)
 
 cfg = load_cfg()
-
 if cmd == "info":
     lines = [l.strip() for l in cfg.get("proxies_raw", "").splitlines() if l.strip() and not l.strip().startswith("#")]
     print(f"Oracle Public IP : {pub_ip()}")
@@ -310,67 +294,47 @@ if cmd == "info":
     print(f"Proxy Auth       : {cfg.get('proxy_user')}:{cfg.get('proxy_pass')}")
     print(f"Start Port       : {cfg.get('start_port', 10001)}")
     print(f"So Proxy Nguon   : {len(lines)}")
-    print(f"Tu khoa DoH      : {', '.join(cfg.get('sanitize_keywords', []))}")
-
 elif cmd == "set-admin":
-    if len(sys.argv) < 4: sys.exit("Thieu tham so: sudo ps-cli set-admin <user> <pass>")
     u, p = sys.argv[2].strip(), sys.argv[3].strip()
     salt = secrets.token_hex(16)
-    h = hashlib.sha256(f"{salt}:{p}".encode()).hexdigest()
     cfg["admin_user"] = u
     cfg["admin_salt"] = salt
-    cfg["admin_pass_hash"] = h
-    save_cfg(cfg)
-    print(f"[OK] Da cap nhat Admin: {u}")
-
+    cfg["admin_pass_hash"] = hashlib.sha256(f"{salt}:{p}".encode()).hexdigest()
+    save_cfg(cfg); print(f"[OK] Da cap nhat Admin: {u}")
 elif cmd == "set-auth":
-    if len(sys.argv) < 4: sys.exit("Thieu tham so: sudo ps-cli set-auth <user> <pass>")
-    cfg["proxy_user"] = sys.argv[2].strip()
-    cfg["proxy_pass"] = sys.argv[3].strip()
-    save_cfg(cfg)
-    print(f"[OK] Da doi Proxy Auth thanh: {cfg['proxy_user']}:{cfg['proxy_pass']}")
-
+    cfg["proxy_user"], cfg["proxy_pass"] = sys.argv[2].strip(), sys.argv[3].strip()
+    save_cfg(cfg); print("[OK] Da doi Proxy Auth!")
 elif cmd == "load":
-    if len(sys.argv) < 3: sys.exit("Thieu tham so: sudo ps-cli load /root/proxies.txt [socks5|http]")
     fpath = sys.argv[2]
-    proto = sys.argv[3] if len(sys.argv) > 3 else cfg.get("default_up_proto", "socks5")
+    proto = sys.argv[3] if len(sys.argv) > 3 else cfg.get("default_up_proto", "http")
     with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
-        raw = f.read()
-    cfg["proxies_raw"] = raw
-    cfg["default_up_proto"] = "http" if proto == "http" else "socks5"
-    save_cfg(cfg)
-    cnt = len([l for l in raw.splitlines() if l.strip() and not l.strip().startswith("#")])
-    print(f"[OK] Da nap {cnt} proxy tu {fpath} ({cfg['default_up_proto']}). List tai /root/wrapped_proxies_socks5.txt")
-
+        cfg["proxies_raw"] = f.read()
+    cfg["default_up_proto"] = "socks5" if proto == "socks5" else "http"
+    save_cfg(cfg); print("[OK] Da nap proxy!")
 elif cmd == "export":
-    scheme = "http" if (len(sys.argv) > 2 and sys.argv[2] == "http") else "socks5"
-    ip = pub_ip()
-    sp = int(cfg.get("start_port", 10001))
-    u, p = cfg.get("proxy_user"), cfg.get("proxy_pass")
-    lines = [l.strip() for l in cfg.get("proxies_raw", "").splitlines() if l.strip() and not l.strip().startswith("#")]
-    for i in range(len(lines)):
-        print(f"{scheme}://{u}:{p}@{ip}:{sp+i}")
-
+    if os.path.exists("/root/wrapped_proxies.txt"):
+        print(open("/root/wrapped_proxies.txt").read().strip())
 elif cmd == "test":
     port = int(sys.argv[2]) if len(sys.argv) > 2 else int(cfg.get("start_port", 10001))
     u, p = cfg.get("proxy_user"), cfg.get("proxy_pass")
-    out = subprocess.check_output(["curl", "-4", "-s", "--max-time", "8", "-x", f"socks5://{u}:{p}@127.0.0.1:{port}", "https://api.ipify.org"]).decode().strip()
-    print(f"[OK] Cong :{port} thong tuyen -> Exit IP: {out}")
-
+    out = subprocess.check_output(["curl", "-4", "-s", "--max-time", "8", "-x", f"http://{u}:{p}@127.0.0.1:{port}", "https://api.ipify.org"]).decode().strip()
+    print(f"[OK] Cong :{port} -> Exit IP: {out}")
 else:
     usage()
 EOF
 chmod +x /usr/local/bin/ps-cli
 
-echo "[*] 7/7. Kich hoat Systemd Service..."
+echo "[*] 7/7. Hoan doi Binary An Toan & Kiem tra Song/Chet (Auto-Rollback)..."
+[[ -f "${DATA_DIR}/config.json" ]] && cp -f "${DATA_DIR}/config.json" "/var/backups/proxy-shield/config.pre-update.json"
+[[ -f "$BIN_PATH" ]] && cp -f "$BIN_PATH" "${BIN_PATH}.bak"
+mv -f "${BIN_PATH}.new" "$BIN_PATH"
+
 EXEC_ARGS="--dash-port=${DASH_PORT} --data-dir=${DATA_DIR} --init-admin-user=${INIT_ADMIN_USER} --init-start-port=${START_PORT}"
-if [[ -n "$INIT_ADMIN_PASS" ]]; then
-  EXEC_ARGS="${EXEC_ARGS} --init-admin-pass=${INIT_ADMIN_PASS}"
-fi
+[[ -n "$INIT_ADMIN_PASS" ]] && EXEC_ARGS="${EXEC_ARGS} --init-admin-pass=${INIT_ADMIN_PASS}"
 
 cat << EOF > "$SVC_PATH"
 [Unit]
-Description=ProxyShield v2.0 Pro Gateway & Deep Inspector
+Description=ProxyShield v3.0 Gateway & Monitor
 After=network-online.target
 Wants=network-online.target
 
@@ -382,26 +346,43 @@ Restart=always
 RestartSec=2
 LimitNOFILE=1048576
 TasksMax=infinity
+LimitNPROC=infinity
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable --now proxy-shield
+systemctl enable proxy-shield >/dev/null 2>&1 || true
 systemctl restart proxy-shield
+
+# Kiem tra suc khoe ban moi trong 5 giay, neu loi tu dong Rollback lai ban cu!
+HEALTH_OK=0
+for _ in 1 2 3 4 5; do
+  if systemctl is-active --quiet proxy-shield && curl -4 -fsS --max-time 2 "http://127.0.0.1:${DASH_PORT}/api/auth/status" >/dev/null 2>&1; then
+    HEALTH_OK=1
+    break
+  fi
+  sleep 1
+done
+
+if (( HEALTH_OK == 0 )); then
+  echo "[!!] BAN MOI LOI KHOI DONG! Dang tu dong ROLLBACK ve ban cu an toan..."
+  if [[ -f "${BIN_PATH}.bak" ]]; then
+    mv -f "${BIN_PATH}.bak" "$BIN_PATH"
+    systemctl restart proxy-shield || true
+  fi
+  exit 1
+fi
 
 PUB_IP=$(curl -4 -s --max-time 3 https://api.ipify.org 2>/dev/null || echo "YOUR_VPS_IP")
 echo "=========================================================================="
-echo " CAI DAT THANH CONG PROXYSHIELD v2.0 PRO!"
+echo " CAP NHAT / CAI DAT AN TOAN THANH CONG PROXYSHIELD v3.0!"
 echo "--------------------------------------------------------------------------"
 echo "  URL Dashboard : http://${PUB_IP}:${DASH_PORT}"
-echo "  SSH Tunnel    : ssh -N -L ${DASH_PORT}:127.0.0.1:${DASH_PORT} ubuntu@${PUB_IP}"
-if (( IS_FRESH == 1 )) && [[ -z "$INIT_ADMIN_PASS" ]]; then
-  echo "  Khoi tao Admin: Mo link tren de TAO TAI KHOAN & MAT KHAU truc tiep!"
-else
-  echo "  Cau hinh      : Da giu nguyen / su dung thong tin Admin da cau hinh."
-fi
-echo "  Lenh Terminal : sudo ps-cli  |  sudo ps-health  |  sudo ps-update"
+echo "  Lenh Dong Bo  : sudo ps-cli sync-rules  (Cap nhat list an 0ms rot mang)"
+echo "  Lenh Kiem Tra : sudo ps-health"
+echo "  Lenh Update   : sudo ps-update"
+echo "  Lenh Xoa Sach : sudo bash ... --purge"
 echo "=========================================================================="
 systemctl status proxy-shield --no-pager

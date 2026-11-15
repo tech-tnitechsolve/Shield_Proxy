@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -36,10 +35,30 @@ type Config struct {
 	ProxyPass        string   `json:"proxy_pass"`
 	StartPort        int      `json:"start_port"`
 	DefaultUpProto   string   `json:"default_up_proto"`
-	AutoCheckMin     int      `json:"auto_check_min"`     // Tu dong check live moi X phut (0 = tat)
-	BandwidthQuotaTB float64  `json:"bandwidth_quota_tb"` // 10 = 10TB Oracle, 0 = Unlimited (OVH)
+	AutoCheckMin     int      `json:"auto_check_min"`
+	BandwidthQuotaTB float64  `json:"bandwidth_quota_tb"`
 	SanitizeKeywords []string `json:"sanitize_keywords"`
 	ProxiesRaw       string   `json:"proxies_raw"`
+}
+
+type DomainStat struct {
+	Hits       int64
+	Sanitized  int64
+	Errors     int64
+	BytesUp    int64
+	BytesDown  int64
+	LastSeen   int64
+	mu         sync.RWMutex
+	Domain     string
+	ResolvedIP string
+}
+
+type TimePoint struct {
+	Time     string  `json:"t"`
+	RPS      float64 `json:"rps"`
+	KBpsUp   float64 `json:"up_kbps"`
+	KBpsDown float64 `json:"dn_kbps"`
+	Errors   int64   `json:"err"`
 }
 
 type BandwidthState struct {
@@ -69,24 +88,10 @@ type VPSSnapshot struct {
 	ProjectedTxGB float64 `json:"projected_tx_gb"`
 }
 
-type DomainStat struct {
-	Hits       int64
-	Sanitized  int64
-	Errors     int64
-	BytesUp    int64
-	BytesDown  int64
-	LastSeen   int64
-	mu         sync.RWMutex
-	Domain     string
-	ResolvedIP string
-}
-
-type TimePoint struct {
-	Time     string  `json:"t"`
-	RPS      float64 `json:"rps"`
-	KBpsUp   float64 `json:"up_kbps"`
-	KBpsDown float64 `json:"dn_kbps"`
-	Errors   int64   `json:"err"`
+type portUsageDump struct {
+	Up   int64 `json:"u"`
+	Down int64 `json:"d"`
+	Reqs int64 `json:"r"`
 }
 
 type parseStats struct {
@@ -101,11 +106,12 @@ const (
 )
 
 var (
-	dataDir    string
-	configPath string
-	bwPath     string
-	pubIP      string
-	dashPort   int
+	dataDir       string
+	configPath    string
+	bwPath        string
+	portUsagePath string
+	pubIP         string
+	dashPort      int
 
 	cfgMu  sync.RWMutex
 	appCfg Config
@@ -234,6 +240,7 @@ func finishReq(rec *RequestRecord, origHost, sentHost string, bUp, bDown int64, 
 	histMu.Unlock()
 }
 
+// ==================== Doc thong so phan cung VPS (Toi uu 1 CPU) ====================
 func readCPUTimes() (total uint64, idle uint64) {
 	b, err := os.ReadFile("/proc/stat")
 	if err != nil {
@@ -339,11 +346,26 @@ func readVPSUptime() int64 {
 }
 
 func countOpenFDs() int {
-	entries, err := os.ReadDir("/proc/self/fd")
+	f, err := os.Open("/proc/self/fd")
 	if err != nil {
 		return 0
 	}
-	return len(entries)
+	names, _ := f.Readdirnames(-1)
+	_ = f.Close()
+	return len(names)
+}
+
+func readAppMemMB() float64 {
+	b, err := os.ReadFile("/proc/self/statm")
+	if err != nil {
+		return 0
+	}
+	f := strings.Fields(string(b))
+	if len(f) < 2 {
+		return 0
+	}
+	rssPages, _ := strconv.ParseUint(f[1], 10, 64)
+	return float64(rssPages*uint64(os.Getpagesize())) / 1048576.0
 }
 
 func readNICBytes() (rxBytes, txBytes uint64) {
@@ -397,6 +419,49 @@ func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
 		}
 	}
 	return os.Rename(tmp, path)
+}
+
+func savePortUsage() {
+	if portUsagePath == "" {
+		return
+	}
+	dump := make(map[int]portUsageDump)
+	runnersMu.RLock()
+	for port, pr := range runners {
+		u := atomic.LoadInt64(&pr.BytesUp)
+		d := atomic.LoadInt64(&pr.BytesDown)
+		r := atomic.LoadInt64(&pr.TotalReqs)
+		if u > 0 || d > 0 || r > 0 {
+			dump[port] = portUsageDump{Up: u, Down: d, Reqs: r}
+		}
+	}
+	runnersMu.RUnlock()
+	if b, err := json.Marshal(dump); err == nil {
+		_ = atomicWriteFile(portUsagePath, b, 0600)
+	}
+}
+
+func loadPortUsage() {
+	b, err := os.ReadFile(portUsagePath)
+	if err != nil {
+		b, err = os.ReadFile(portUsagePath + ".bak")
+		if err != nil {
+			return
+		}
+	}
+	var dump map[int]portUsageDump
+	if json.Unmarshal(b, &dump) != nil {
+		return
+	}
+	runnersMu.RLock()
+	for port, st := range dump {
+		if pr, ok := runners[port]; ok {
+			atomic.StoreInt64(&pr.BytesUp, st.Up)
+			atomic.StoreInt64(&pr.BytesDown, st.Down)
+			atomic.StoreInt64(&pr.TotalReqs, st.Reqs)
+		}
+	}
+	runnersMu.RUnlock()
 }
 
 func loadBandwidthState() {
@@ -490,7 +555,8 @@ func startTelemetryTicker() {
 	var prevReqs, prevUp, prevDn, prevErr int64
 
 	tickCount := 0
-	tk := time.NewTicker(2 * time.Second)
+	cachedFDs := countOpenFDs()
+	tk := time.NewTicker(3 * time.Second)
 	for range tk.C {
 		tickCount++
 
@@ -505,17 +571,25 @@ func startTelemetryTicker() {
 		runnersMu.RUnlock()
 
 		dReqs, dUp, dDn, dErr := curReqs-prevReqs, curUp-prevUp, curDn-prevDn, curErr-prevErr
-		if dReqs < 0 { dReqs = 0 }
-		if dUp < 0 { dUp = 0 }
-		if dDn < 0 { dDn = 0 }
-		if dErr < 0 { dErr = 0 }
+		if dReqs < 0 {
+			dReqs = 0
+		}
+		if dUp < 0 {
+			dUp = 0
+		}
+		if dDn < 0 {
+			dDn = 0
+		}
+		if dErr < 0 {
+			dErr = 0
+		}
 		prevReqs, prevUp, prevDn, prevErr = curReqs, curUp, curDn, curErr
 
 		pt := TimePoint{
 			Time:     time.Now().Format("15:04:05"),
-			RPS:      float64(dReqs) / 2.0,
-			KBpsUp:   float64(dUp) / 2048.0,
-			KBpsDown: float64(dDn) / 2048.0,
+			RPS:      float64(dReqs) / 3.0,
+			KBpsUp:   float64(dUp) / 3072.0,
+			KBpsDown: float64(dDn) / 3072.0,
 			Errors:   dErr,
 		}
 		tsMu.Lock()
@@ -540,8 +614,12 @@ func startTelemetryTicker() {
 
 		curNICRx, curNICTx := readNICBytes()
 		var dNICRx, dNICTx uint64
-		if curNICRx >= prevNICRx { dNICRx = curNICRx - prevNICRx }
-		if curNICTx >= prevNICTx { dNICTx = curNICTx - prevNICTx }
+		if curNICRx >= prevNICRx {
+			dNICRx = curNICRx - prevNICRx
+		}
+		if curNICTx >= prevNICTx {
+			dNICTx = curNICTx - prevNICTx
+		}
 		prevNICRx, prevNICTx = curNICRx, curNICTx
 
 		curMonth := time.Now().Format("2006-01")
@@ -557,11 +635,15 @@ func startTelemetryTicker() {
 		mTx := bwState.MonthTxBytes
 		bwMu.Unlock()
 
-		if tickCount%30 == 0 {
+		if tickCount%20 == 0 {
 			saveBandwidthState()
+			savePortUsage()
 		}
-		if tickCount%150 == 0 {
+		if tickCount%100 == 0 {
 			syncVnstatMonth()
+		}
+		if tickCount%5 == 0 {
+			cachedFDs = countOpenFDs()
 		}
 
 		mTot, mUsed, sTot, sUsed := readMemInfo()
@@ -578,11 +660,11 @@ func startTelemetryTicker() {
 			DiskTotalGB:   dTot,
 			DiskUsedGB:    dUsed,
 			VPSUptimeSec:  readVPSUptime(),
-			OpenFDs:       countOpenFDs(),
+			OpenFDs:       cachedFDs,
 			ConntrackCur:  readProcInt("/proc/sys/net/netfilter/nf_conntrack_count"),
 			ConntrackMax:  readProcInt("/proc/sys/net/netfilter/nf_conntrack_max"),
-			NICRxMbps:     float64(dNICRx) * 8.0 / 2.0 / 1000000.0,
-			NICTxMbps:     float64(dNICTx) * 8.0 / 2.0 / 1000000.0,
+			NICRxMbps:     float64(dNICRx) * 8.0 / 3.0 / 1000000.0,
+			NICTxMbps:     float64(dNICTx) * 8.0 / 3.0 / 1000000.0,
 			MonthRxBytes:  mRx,
 			MonthTxBytes:  mTx,
 			ProjectedTxGB: calcProjectedMonthGB(mTx),
@@ -605,7 +687,7 @@ func startAutoCheckLoop() {
 			hasRunners := len(runners) > 0
 			runnersMu.RUnlock()
 			if hasRunners {
-				triggerScan("deep")
+				triggerScan("quick")
 			}
 		} else {
 			mins = 1
@@ -614,6 +696,7 @@ func startAutoCheckLoop() {
 	}
 }
 
+// ==================== Tien ich Config, Auth & Reload ====================
 func randomHex(n int) string {
 	b := make([]byte, n)
 	_, _ = rand.Read(b)
@@ -729,7 +812,6 @@ func reservePortsSysctl(startPort, count int) {
 	_ = os.WriteFile("/proc/sys/net/ipv4/ip_local_reserved_ports", []byte(val), 0644)
 }
 
-// Xuat 1:1 dung giao thuc dau vao -> dau ra (http -> http, socks5 -> socks5)
 func exportDiskFiles(cfg Config, items []Upstream) {
 	var matchedLines []string
 	for i, u := range items {
@@ -744,7 +826,7 @@ func exportDiskFiles(cfg Config, items []Upstream) {
 
 func applyConfigAndReload(cfg Config) (int, parseStats, error) {
 	pStats := parseProxiesFlexible(cfg.ProxiesRaw, cfg.DefaultUpProto, false)
-	setSanitizeKeywords(cfg.SanitizeKeywords)
+	rebuildActiveKeywords(cfg.SanitizeKeywords)
 	reservePortsSysctl(cfg.StartPort, len(pStats.Items))
 
 	desired := make(map[int]Upstream, len(pStats.Items))
@@ -861,12 +943,8 @@ func loadOrInitConfig(initAdminUser, initAdminPass string, initStartPort int) Co
 		DefaultUpProto:   "http",
 		AutoCheckMin:     5,
 		BandwidthQuotaTB: 10.0,
-		SanitizeKeywords: []string{
-			"bytelixir", "bylxr", "brightnetip", "pawns",
-			"honeygain", "earnapp", "packetstream", "packetshare",
-			"traffmonetizer", "repocket", "earnfm",
-		},
-		ProxiesRaw: "",
+		SanitizeKeywords: []string{},
+		ProxiesRaw:       "",
 	}
 	_ = saveConfigFile(c)
 	return c
@@ -901,17 +979,28 @@ func main() {
 	_ = os.MkdirAll(dataDir, 0700)
 	configPath = filepath.Join(dataDir, "config.json")
 	bwPath = filepath.Join(dataDir, "bandwidth.json")
+	portUsagePath = filepath.Join(dataDir, "port_usage.json")
 	pubIP = detectPublicIP()
 
 	appCfg = loadOrInitConfig(*initUser, *initPass, *initStart)
+	initRules()
 	cnt, _, err := applyConfigAndReload(appCfg)
 	if err != nil {
 		log.Printf("Canh bao reload: %v", err)
 	}
+	loadPortUsage()
 
 	go startTelemetryTicker()
 	go startSessionCleaner()
 	go startAutoCheckLoop()
+	go startRulesSyncLoop()
+	go func() {
+		usrCh := make(chan os.Signal, 1)
+		signal.Notify(usrCh, syscall.SIGUSR1)
+		for range usrCh {
+			_, _, _ = syncRulesFromGitHub(true)
+		}
+	}()
 	go startWebDashboard(dashPort)
 
 	log.Printf("ProxyShield v3.0 san sang! Public IP: %s | %d cong | Dashboard: http://%s:%d", pubIP, cnt, pubIP, dashPort)
@@ -921,11 +1010,11 @@ func main() {
 	<-sigCh
 
 	saveBandwidthState()
+	savePortUsage()
 	runnersMu.Lock()
 	for _, pr := range runners {
 		atomic.StoreInt32(&pr.closed, 1)
 		_ = pr.ln.Close()
 	}
 	runnersMu.Unlock()
-	_ = context.Background()
 }

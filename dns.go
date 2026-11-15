@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -29,6 +28,7 @@ var (
 
 	dnsMu       sync.RWMutex
 	dnsCache    = make(map[string]dnsEntry)
+	staleCache  = make(map[string][]string)
 	inflightMu  sync.Mutex
 	inflightMap = make(map[string]*dnsCall)
 	rrCounter   uint64
@@ -150,7 +150,6 @@ func resolveDoH(domain string) (string, error) {
 	ips, err := fetchDoHIPv4List(domain)
 	if err == nil && len(ips) > 0 {
 		dnsMu.Lock()
-		// Gioi han kich thuoc DNS cache de khong phinh RAM
 		if len(dnsCache) > 10000 {
 			for k := range dnsCache {
 				delete(dnsCache, k)
@@ -158,7 +157,22 @@ func resolveDoH(domain string) (string, error) {
 			}
 		}
 		dnsCache[domain] = dnsEntry{ips: ips, exp: time.Now().Add(300 * time.Second)}
+		if len(staleCache) > 10000 {
+			for k := range staleCache {
+				delete(staleCache, k)
+				break
+			}
+		}
+		staleCache[domain] = ips
 		dnsMu.Unlock()
+	} else {
+		// Neu DoH tam thoi loi, lay IP cu da cache truoc do (tuyet doi khong ro ri DNS ra ngoai)
+		dnsMu.RLock()
+		if oldIPs, ok := staleCache[domain]; ok && len(oldIPs) > 0 {
+			ips = oldIPs
+			err = nil
+		}
+		dnsMu.RUnlock()
 	}
 
 	call.ips = ips
@@ -221,23 +235,7 @@ func fetchDoHIPv4List(domain string) ([]string, error) {
 	if ips, err := queryDoHJSON("https://8.8.8.8/resolve?name=" + domain + "&type=A"); err == nil {
 		return ips, nil
 	}
-	// 3. Last fallback: System IPv4 resolver
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	sysIPs, err := (&net.Resolver{}).LookupIP(ctx, "ip4", domain)
-	if err != nil || len(sysIPs) == 0 {
-		return nil, fmt.Errorf("resolve failed: %s", domain)
-	}
-	var out []string
-	for _, ip := range sysIPs {
-		if ip4 := ip.To4(); ip4 != nil {
-			out = append(out, ip4.String())
-		}
-	}
-	if len(out) == 0 {
-		return nil, fmt.Errorf("no ipv4 for %s", domain)
-	}
-	return out, nil
+	return nil, fmt.Errorf("doh resolve failed: %s", domain)
 }
 
 func getDNSCacheCount() int {

@@ -286,7 +286,7 @@ func triggerScan(mode string) int {
 
 	go func() {
 		defer atomic.StoreInt32(&scanState.Running, 0)
-		sem := make(chan struct{}, 50)
+		sem := make(chan struct{}, 25)
 		var wg sync.WaitGroup
 		for _, pr := range list {
 			if ctx.Err() != nil {
@@ -371,10 +371,46 @@ func apiTestSinglePort(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func apiOverview(w http.ResponseWriter, r *http.Request) {
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
+func apiResetPortData(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		return
+	}
+	var body struct {
+		Port int `json:"port"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
 
+	runnersMu.RLock()
+	if body.Port > 0 {
+		if pr, ok := runners[body.Port]; ok {
+			atomic.StoreInt64(&pr.BytesUp, 0)
+			atomic.StoreInt64(&pr.BytesDown, 0)
+			atomic.StoreInt64(&pr.TotalReqs, 0)
+			atomic.StoreInt64(&pr.SanitizedReqs, 0)
+			atomic.StoreInt64(&pr.ErrorReqs, 0)
+			pr.mu.Lock()
+			pr.lastErr = ""
+			pr.mu.Unlock()
+		}
+	} else {
+		for _, pr := range runners {
+			atomic.StoreInt64(&pr.BytesUp, 0)
+			atomic.StoreInt64(&pr.BytesDown, 0)
+			atomic.StoreInt64(&pr.TotalReqs, 0)
+			atomic.StoreInt64(&pr.SanitizedReqs, 0)
+			atomic.StoreInt64(&pr.ErrorReqs, 0)
+			pr.mu.Lock()
+			pr.lastErr = ""
+			pr.mu.Unlock()
+		}
+	}
+	runnersMu.RUnlock()
+	savePortUsage()
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// ==================== Overview API (Zero STW Pause) ====================
+func apiOverview(w http.ResponseWriter, r *http.Request) {
 	var totalConns, totalReqs, totalSanitized, totalErrors, totalUp, totalDown int64
 	var alivePorts, deadPorts, totalPorts int
 
@@ -418,12 +454,16 @@ func apiOverview(w http.ResponseWriter, r *http.Request) {
 		quotaPct = (float64(vps.MonthTxBytes) / quotaBytes) * 100.0
 	}
 
+	rulesCnt, rulesSync := getRulesStatus()
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"public_ip":       pubIP,
 		"uptime_sec":      int64(time.Since(startTime).Seconds()),
 		"goroutines":      runtime.NumGoroutine(),
-		"app_mem_mb":      float64(m.Alloc) / 1048576.0,
+		"app_mem_mb":      readAppMemMB(),
 		"dns_cache_cnt":   getDNSCacheCount(),
+		"rules_count":     rulesCnt,
+		"rules_last_sync": rulesSync,
 		"vps":             vps,
 		"quota_tb":        quotaTB,
 		"quota_pct":       quotaPct,
@@ -570,7 +610,7 @@ func apiPorts(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// ==================== Domain Intelligence ====================
+// ==================== Domain Intelligence & Rules Sync ====================
 func apiDomains(w http.ResponseWriter, r *http.Request) {
 	q := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
 	filter := r.URL.Query().Get("filter")
@@ -660,14 +700,33 @@ func apiAddSanitizeKeyword(w http.ResponseWriter, r *http.Request) {
 	if !exists {
 		appCfg.SanitizeKeywords = append(appCfg.SanitizeKeywords, kw)
 		_ = saveConfigFile(appCfg)
-		setSanitizeKeywords(appCfg.SanitizeKeywords)
+		rebuildActiveKeywords(appCfg.SanitizeKeywords)
 	}
 	cfgMu.Unlock()
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{"status": "ok", "keyword": kw})
 }
 
-// ==================== Requests Inspector O(1) ====================
+func apiSyncRules(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		return
+	}
+	remCnt, updated, err := syncRulesFromGitHub(true)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "Khong tai duoc sanitize_domains.txt: " + err.Error()})
+		return
+	}
+	total, last := getRulesStatus()
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":       "ok",
+		"remote_count": remCnt,
+		"total_rules":  total,
+		"updated":      updated,
+		"last_sync":    last,
+	})
+}
+
+// ==================== Requests Inspector (Fast O(1) Copy Limit) ====================
 func collectFilteredRequests(q, actionFilter, protoFilter, portFilter string, limit int) []RequestRecord {
 	q = strings.ToLower(strings.TrimSpace(q))
 	portWant := 0
@@ -685,16 +744,6 @@ func collectFilteredRequests(q, actionFilter, protoFilter, portFilter string, li
 	}
 	activeMu.RUnlock()
 	sort.Slice(activeSnapshot, func(i, j int) bool { return activeSnapshot[i].ID > activeSnapshot[j].ID })
-
-	histMu.RLock()
-	cnt := histCount
-	head := histHead
-	histSnapshot := make([]RequestRecord, cnt)
-	for i := 0; i < cnt; i++ {
-		idx := (head - 1 - i + maxHistoryLogs) % maxHistoryLogs
-		histSnapshot[i] = histBuf[idx]
-	}
-	histMu.RUnlock()
 
 	match := func(r RequestRecord) bool {
 		if portWant > 0 && r.Port != portWant {
@@ -739,14 +788,21 @@ func collectFilteredRequests(q, actionFilter, protoFilter, portFilter string, li
 			}
 		}
 	}
-	for _, r := range histSnapshot {
+
+	histMu.RLock()
+	cnt := histCount
+	head := histHead
+	for i := 0; i < cnt; i++ {
+		idx := (head - 1 - i + maxHistoryLogs) % maxHistoryLogs
+		r := histBuf[idx]
 		if match(r) {
 			out = append(out, r)
 			if len(out) >= limit {
-				return out
+				break
 			}
 		}
 	}
+	histMu.RUnlock()
 	return out
 }
 
@@ -799,7 +855,7 @@ func apiClearLogs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// ==================== Config, Paste Studio & Remove Dead ====================
+// ==================== Config, Paste Studio, Backup & Export ====================
 func apiGetConfig(w http.ResponseWriter, r *http.Request) {
 	cfgMu.RLock()
 	c := appCfg
@@ -850,7 +906,6 @@ func apiSaveProxies(w http.ResponseWriter, r *http.Request) {
 	cfgMu.Unlock()
 
 	cnt, _, err := applyConfigAndReload(newCfg)
-	// Tu dong kiem tra song/chet ngay bang IP VPS sau khi luu
 	go triggerScan("deep")
 
 	resp := map[string]interface{}{
@@ -980,7 +1035,7 @@ func apiSaveSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 func apiExportWrapped(w http.ResponseWriter, r *http.Request) {
-	filter := r.URL.Query().Get("filter") // all, alive, hide_dead
+	filter := r.URL.Query().Get("filter")
 
 	cfgMu.RLock()
 	c := appCfg
@@ -1013,7 +1068,6 @@ func apiExportWrapped(w http.ResponseWriter, r *http.Request) {
 
 	var lines []string
 	for _, row := range rows {
-		// Dau vao nao -> dau ra dung giao thuc do (1:1)
 		lines = append(lines, fmt.Sprintf("%s://%s:%s@%s:%d", row.proto, c.ProxyUser, c.ProxyPass, pubIP, row.port))
 	}
 
@@ -1076,8 +1130,10 @@ func startWebDashboard(port int) {
 	mux.HandleFunc("/api/overview", requireAuth(apiOverview))
 	mux.HandleFunc("/api/ports", requireAuth(apiPorts))
 	mux.HandleFunc("/api/ports/test", requireAuth(apiTestSinglePort))
+	mux.HandleFunc("/api/ports/reset", requireAuth(apiResetPortData))
 	mux.HandleFunc("/api/domains", requireAuth(apiDomains))
 	mux.HandleFunc("/api/domains/sanitize", requireAuth(apiAddSanitizeKeyword))
+	mux.HandleFunc("/api/rules/sync", requireAuth(apiSyncRules))
 	mux.HandleFunc("/api/requests", requireAuth(apiRequests))
 	mux.HandleFunc("/api/requests/csv", requireAuth(apiExportCSV))
 	mux.HandleFunc("/api/requests/clear", requireAuth(apiClearLogs))

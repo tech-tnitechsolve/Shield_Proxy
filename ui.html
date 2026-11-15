@@ -19,8 +19,8 @@
     padding: 12px 24px; background: rgba(13,19,34,0.95); border-bottom: 1px solid var(--border);
     position: sticky; top: 0; z-index: 30;
   }
-  .brand { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-  .brand-title { font-weight: 800; font-size: 17px; color: var(--accent); display: flex; align-items: center; gap: 8px; }
+  .brand { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .brand-title { font-weight: 800; font-size: 17px; color: var(--accent); display: flex; align-items: center; gap: 8px; margin-right: 4px; }
   .pill { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--bg2); border: 1px solid var(--border); }
   .pill-green { background: rgba(34,197,94,0.14); color: var(--green); border-color: rgba(34,197,94,0.35); }
   .pill-blue  { background: rgba(56,189,248,0.14); color: var(--accent); border-color: rgba(56,189,248,0.35); }
@@ -96,10 +96,11 @@
       <span id="pubIpBadge" class="pill pill-blue mono">IP VPS: ...</span>
       <span id="uptimeBadge" class="pill mono">Uptime: ...</span>
       <span id="autoBadge" class="pill pill-green mono">Auto-Check: 5p</span>
+      <span id="rulesBadge" class="pill pill-green mono">Ẩn: ...</span>
       <span id="credBadge" class="pill pill-amber mono">Auth: ...</span>
     </div>
     <div style="display:flex;gap:8px;align-items:center">
-      <button class="btn btn-sec btn-sm" onclick="togglePause()" id="pauseBtn">Tự động: 2s</button>
+      <button class="btn btn-sec btn-sm" onclick="togglePause()" id="pauseBtn">Tự động: 3s</button>
       <button class="btn btn-sec btn-sm" onclick="logout()">Đăng xuất</button>
     </div>
   </div>
@@ -143,7 +144,7 @@
       </div>
     </div>
 
-    <!-- CHỈ 3 TAB TINH GỌN, DỄ HIỂU -->
+    <!-- 3 TAB TINH GỌN, DỄ HIỂU -->
     <div class="tabs">
       <button class="tab active" onclick="switchTab('proxies', this)">1. Quản Lý &amp; Bọc Proxy</button>
       <button class="tab" onclick="switchTab('requests', this)">2. Theo Dõi Request (Logs)</button>
@@ -199,26 +200,27 @@
         </div>
       </div>
 
-      <!-- BẢNG TRẠNG THÁI TỪNG CỔNG -->
+      <!-- BẢNG TRẠNG THÁI & DATA TỪNG CỔNG -->
       <div class="card">
         <div class="row" style="justify-content:space-between">
           <div class="row" style="margin:0;flex:1">
-            <input id="pq" placeholder="Tìm cổng, IP nguồn, Exit IP..." style="max-width:250px" oninput="portPage=1;lastPortSig='';loadPorts()">
-            <select id="pfilter" style="max-width:170px" onchange="portPage=1;lastPortSig='';loadPorts()">
+            <input id="pq" placeholder="Tìm cổng, IP nguồn, Exit IP..." style="max-width:230px" oninput="portPage=1;lastPortSig='';loadPorts()">
+            <select id="pfilter" style="max-width:165px" onchange="portPage=1;lastPortSig='';loadPorts()">
               <option value="all">Tất cả cổng</option>
               <option value="alive">Đang SỐNG (LIVE)</option>
               <option value="dead">Bị CHẾT (DIE)</option>
               <option value="untested">Chờ kiểm tra</option>
               <option value="err">Có lỗi kết nối</option>
             </select>
-            <select id="psort" style="max-width:180px" onchange="portPage=1;lastPortSig='';loadPorts()">
+            <select id="psort" style="max-width:175px" onchange="portPage=1;lastPortSig='';loadPorts()">
               <option value="port">Sắp xếp: Số cổng</option>
-              <option value="traffic">Sắp xếp: Lưu lượng</option>
+              <option value="traffic">Sắp xếp: Data cao</option>
               <option value="err">Sắp xếp: Nhiều lỗi</option>
               <option value="latency">Sắp xếp: Ping cao</option>
             </select>
+            <button class="btn btn-red btn-sm" onclick="resetPortData(0)">Reset Tất Cả Data</button>
           </div>
-          <div id="scanProgressRow" class="row hidden" style="margin:0;min-width:280px">
+          <div id="scanProgressRow" class="row hidden" style="margin:0;min-width:260px">
             <span id="scanText" class="mono" style="font-size:12px">Đang test: 0/0</span>
             <div class="meter" style="flex:1;margin:0"><div id="scanBar" class="meter-fill" style="background:var(--green);width:0%"></div></div>
             <button class="btn btn-red btn-sm" onclick="stopScan()">Dừng</button>
@@ -229,7 +231,8 @@
             <thead>
               <tr>
                 <th>Cổng VPS</th><th>Proxy Nguồn</th><th>Loại</th><th>Trạng thái (Check IP VPS)</th><th>Ping</th>
-                <th>Exit IP Thực Tế</th><th>Đang chạy</th><th>Lượt Req</th><th>Đã ẩn Domain</th><th>Lỗi</th><th>Up / Down</th><th>Chi tiết lỗi</th><th>Test</th>
+                <th>Exit IP Thực Tế</th><th>Đang chạy</th><th>Lượt Req</th><th>Đã ẩn</th><th>Lỗi</th>
+                <th>Tổng Data</th><th>Up / Down</th><th>Chi tiết lỗi</th><th>Thao tác</th>
               </tr>
             </thead>
             <tbody id="portBody"></tbody>
@@ -249,7 +252,7 @@
     <!-- TAB 2: THEO DÕI REQUEST (LOGS) -->
     <div id="tab-requests" class="card hidden">
       <div class="row">
-        <input id="fq" placeholder="Tìm domain, IP, cổng, lỗi..." style="max-width:260px" oninput="lastReqSig='';loadRequests()">
+        <input id="fq" placeholder="Tìm domain, IP, cổng, lỗi..." style="max-width:250px" oninput="lastReqSig='';loadRequests()">
         <select id="fact" style="max-width:190px" onchange="lastReqSig='';loadRequests()">
           <option value="ALL">Tất cả Request</option>
           <option value="LIVE">Đang chạy (LIVE)</option>
@@ -257,7 +260,8 @@
           <option value="DIRECT">Giữ nguyên Domain</option>
           <option value="ERR">Bị lỗi (ERR)</option>
         </select>
-        <input id="fport" placeholder="Cổng (10001)" style="max-width:130px" oninput="lastReqSig='';loadRequests()">
+        <input id="fport" placeholder="Cổng (10001)" style="max-width:120px" oninput="lastReqSig='';loadRequests()">
+        <button class="btn btn-green" onclick="syncRulesNow()">Cập Nhật List Ẩn GitHub</button>
         <button class="btn btn-sec" onclick="exportCSV()">Tải CSV</button>
         <button class="btn btn-red" onclick="clearLogs()">Xóa lịch sử</button>
       </div>
@@ -276,7 +280,7 @@
     </div>
 
     <!-- TAB 3: CÀI ĐẶT ALL-IN-ONE & BACKUP -->
-    <div id="tab-settings" class="card hidden" style="max-width:860px">
+    <div id="tab-settings" class="card hidden" style="max-width:880px">
       <h3 style="margin-top:0">Cài Đặt Toàn Bộ Hệ Thống (Lưu Tự Động Chống Mất Khi Reboot)</h3>
       <div class="split-2">
         <div class="form-group"><label>Tài khoản Proxy (Username)</label><input id="sProxyUser"></div>
@@ -291,7 +295,7 @@
       </div>
       <div class="split-2">
         <div class="form-group"><label>Hạn mức Bandwidth Tháng (TB) — 10 cho Oracle Free, 0 = Không giới hạn</label><input id="sQuotaTB" type="number" step="0.5" min="0"></div>
-        <div class="form-group"><label>Từ khóa Domain cần Ẩn khỏi Nhà cung cấp (cách nhau dấu phẩy)</label><input id="sKeywords"></div>
+        <div class="form-group"><label>Từ khóa Ẩn BỔ SUNG riêng (danh sách chuẩn tự sync từ sanitize_domains.txt)</label><input id="sKeywords" placeholder="vd: mydomain1, mydomain2"></div>
       </div>
       <hr style="border:0;border-top:1px solid var(--border);margin:18px 0">
       <h4 style="margin-top:0">Tài Khoản Admin Đăng Nhập Web</h4>
@@ -301,9 +305,10 @@
       </div>
       <div class="row" style="margin-top:10px">
         <button class="btn" onclick="saveSettings()">Lưu Toàn Bộ Cài Đặt</button>
-        <a class="btn btn-sec" href="/api/backup" style="text-decoration:none">Tải File Backup (.json)</a>
+        <button class="btn btn-green" onclick="syncRulesNow()">Cập Nhật List Ẩn GitHub (Không Restart)</button>
+        <a class="btn btn-sec" href="/api/backup" style="text-decoration:none">Tải Backup (.json)</a>
         <label class="btn btn-sec" style="cursor:pointer;margin:0">
-          Khôi Phục Từ Backup (.json)<input type="file" accept=".json" style="display:none" onchange="restoreBackup(event)">
+          Khôi Phục Backup (.json)<input type="file" accept=".json" style="display:none" onchange="restoreBackup(event)">
         </label>
       </div>
     </div>
@@ -328,6 +333,12 @@ function fmtBytes(b) {
   if (b < 1073741824) return (b / 1048576).toFixed(2) + ' MB';
   if (b < 1099511627776) return (b / 1073741824).toFixed(2) + ' GB';
   return (b / 1099511627776).toFixed(2) + ' TB';
+}
+function fmtDataMBGB(b) {
+  if (!b || b <= 0) return '0.0 MB';
+  var mb = b / 1048576;
+  if (mb < 1024) return mb.toFixed(1) + ' MB';
+  return (mb / 1024).toFixed(2) + ' GB';
 }
 function fmtUptime(s) {
   s = Math.max(0, s || 0);
@@ -402,6 +413,7 @@ async function loadOverview() {
     document.getElementById('pubIpBadge').textContent = 'IP VPS: ' + d.public_ip;
     document.getElementById('uptimeBadge').textContent = 'Uptime: ' + fmtUptime(v.vps_uptime_sec);
     document.getElementById('autoBadge').textContent = d.auto_check_min > 0 ? ('Auto-Check: ' + d.auto_check_min + 'p') : 'Auto-Check: Tắt';
+    document.getElementById('rulesBadge').textContent = 'Ẩn: ' + (d.rules_count || 0) + ' (' + (d.rules_last_sync || '-') + ')';
     document.getElementById('credBadge').textContent = 'Auth: ' + d.proxy_user + ':' + d.proxy_pass;
 
     var cpu = v.cpu_pct || 0;
@@ -480,6 +492,7 @@ async function loadPorts() {
       var hb = '<span class="pill pill-amber" style="padding:2px 8px">Chờ test</span>';
       if (p.health === 'alive') hb = '<span class="pill pill-green" style="padding:2px 8px">LIVE</span>';
       else if (p.health === 'dead') hb = '<span class="pill pill-red" style="padding:2px 8px">DIE</span>';
+      var totB = (p.bytes_up || 0) + (p.bytes_down || 0);
       html += '<tr>' +
         '<td class="mono"><b>:' + p.port + '</b></td>' +
         '<td class="mono">' + esc(p.upstream) + '</td>' +
@@ -491,13 +504,25 @@ async function loadPorts() {
         '<td class="mono">' + p.total_reqs + '</td>' +
         '<td class="mono" style="color:var(--green)">' + p.sanitized_reqs + '</td>' +
         '<td class="mono" style="color:var(--red)">' + p.error_reqs + '</td>' +
-        '<td class="mono">' + fmtBytes(p.bytes_up) + ' / ' + fmtBytes(p.bytes_down) + '</td>' +
-        '<td style="color:var(--red);max-width:200px;overflow:hidden;text-overflow:ellipsis">' + esc(p.last_err) + '</td>' +
-        '<td><button class="btn btn-sec btn-sm" onclick="testOnePort(' + p.port + ')">Test</button></td>' +
+        '<td class="mono"><b style="color:var(--accent)">' + fmtDataMBGB(totB) + '</b></td>' +
+        '<td class="mono" style="color:var(--muted);font-size:12px">' + fmtBytes(p.bytes_up) + ' / ' + fmtBytes(p.bytes_down) + '</td>' +
+        '<td style="color:var(--red);max-width:180px;overflow:hidden;text-overflow:ellipsis">' + esc(p.last_err) + '</td>' +
+        '<td style="display:flex;gap:5px"><button class="btn btn-sec btn-sm" onclick="testOnePort(' + p.port + ')">Test</button><button class="btn btn-red btn-sm" onclick="resetPortData(' + p.port + ')">Reset</button></td>' +
         '</tr>';
     });
-    document.getElementById('portBody').innerHTML = html || '<tr><td colspan="13" style="text-align:center;color:var(--muted);padding:20px">Chưa có proxy nào. Hãy dán proxy vào ô phía trên và bấm Lưu!</td></tr>';
+    document.getElementById('portBody').innerHTML = html || '<tr><td colspan="14" style="text-align:center;color:var(--muted);padding:20px">Chưa có proxy nào. Hãy dán proxy vào ô phía trên và bấm Lưu!</td></tr>';
   } catch (e) {}
+}
+
+async function resetPortData(port) {
+  var msg = port > 0 ? ('Reset số liệu Data của cổng :' + port + '?') : 'Reset toàn bộ số liệu MB/GB của TẤT CẢ các cổng?';
+  if (!confirm(msg)) return;
+  await api('/api/ports/reset', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({port: port})
+  });
+  toast(port > 0 ? ('Đã reset data cổng :' + port) : 'Đã reset toàn bộ data proxy!');
+  lastPortSig = ''; loadPorts(); loadOverview();
 }
 
 async function testOnePort(port) {
@@ -553,7 +578,15 @@ async function quickSanitize(domain) {
   var kw = parts.length >= 2 ? parts.slice(-2).join('.') : domain;
   await api('/api/domains/sanitize', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({keyword: kw})});
   toast('Đã thêm "' + kw + '" vào danh sách tự động ẩn!');
-  lastReqSig = ''; loadRequests();
+  lastReqSig = ''; loadRequests(); loadOverview();
+}
+
+async function syncRulesNow() {
+  var r = await api('/api/rules/sync', {method: 'POST'});
+  var d = await r.json();
+  if (!r.ok) { toast(d.error || 'Lỗi đồng bộ danh sách ẩn!'); return; }
+  toast('Đã nạp ' + d.total_rules + ' từ khóa ẩn vào RAM (0ms gián đoạn proxy)!');
+  loadOverview();
 }
 
 function analyzeInputBox() {
@@ -667,7 +700,7 @@ function exportCSV() {
   window.location = '/api/requests/csv?' + qs.toString();
 }
 async function clearLogs() { await api('/api/requests/clear', {method: 'POST'}); lastReqSig = ''; loadRequests(); toast('Đã xóa lịch sử!'); }
-function togglePause() { paused = !paused; document.getElementById('pauseBtn').textContent = paused ? 'Đang tạm dừng' : 'Tự động: 2s'; }
+function togglePause() { paused = !paused; document.getElementById('pauseBtn').textContent = paused ? 'Đang tạm dừng' : 'Tự động: 3s'; }
 
 async function initApp() {
   try {
@@ -686,7 +719,7 @@ setInterval(function() {
     if (currentTab === 'proxies') { loadPorts(); }
     if (currentTab === 'requests') { loadRequests(); }
   }
-}, 2000);
+}, 3000);
 
 initApp();
 </script>
