@@ -1,14 +1,14 @@
 # ==============================================================================
-# Danh sach tu khoa / ten mien can AN khoi Proxy Nguon (Tự dong cap nhat hot-reload)
-# Moi dong 1 tu khoa (khong phan biet hoa thuong). Dong # la ghi chu.
+# DANH SACH DOMAIN CAN AN THANH IP THUAN QUA DoH (Chong Webshare soi app/check IP)
+# Tu dong dong bo moi 3 phut vao RAM (0ms gian doan proxy)
 # ==============================================================================
 
-# --- ByteLixir & he thong broker ---
+# --- ByteLixir & he thong ---
 bytelixir
 bylxr
 brightnetip
 
-# --- Cac app Bandwidth Sharing pho bien ---
+# --- Cac app Bandwidth Sharing & DePIN ---
 pawns
 iproyal
 honeygain
@@ -30,8 +30,6 @@ packetsdk
 castarsdk
 wipter
 cloudcollab
-
-# --- DePIN & Browser Nodes ---
 mysterium
 mystnodes
 urnetwork
@@ -43,3 +41,16 @@ nodepay
 uprock
 ebesucher
 adnade
+
+# --- Cac trang check IP thuong bi soi khi chay dan proxy ---
+ipify
+icanhazip
+ipinfo.io
+ip-api.com
+whatismyip
+myexternalip
+checkip
+ifconfig.me
+wtfismyip
+ipecho.net
+ident.me

@@ -70,7 +70,6 @@ apt-get -o DPkg::Lock::Timeout=60 install -y -qq --no-install-recommends \
 systemctl enable --now chrony >/dev/null 2>&1 || true
 systemctl disable --now snapd snapd.socket >/dev/null 2>&1 || true
 
-# Dam bao Go >= 1.18
 NEED_GO=0
 if ! command -v go >/dev/null 2>&1; then
   NEED_GO=1
@@ -107,9 +106,9 @@ if [[ -n "$LOCAL_SCRIPT" && -f "$LOCAL_SCRIPT" ]]; then
   SCRIPT_DIR="$(cd "$(dirname "$LOCAL_SCRIPT")" && pwd)"
 fi
 
-if [[ -n "$SCRIPT_DIR" && -f "$SCRIPT_DIR/go.mod" && -f "$SCRIPT_DIR/main.go" && -f "$SCRIPT_DIR/rules.go" && -f "$SCRIPT_DIR/ui.html" && -f "$SCRIPT_DIR/sanitize_domains.txt" ]]; then
+if [[ -n "$SCRIPT_DIR" && -f "$SCRIPT_DIR/go.mod" && -f "$SCRIPT_DIR/main.go" && -f "$SCRIPT_DIR/rules.go" && -f "$SCRIPT_DIR/ui.html" && -f "$SCRIPT_DIR/sanitize_domains.txt" && -f "$SCRIPT_DIR/block_domains.txt" ]]; then
   echo "[*] Build tu thu muc local: $SCRIPT_DIR"
-  cp -f "$SCRIPT_DIR"/*.go "$SCRIPT_DIR/go.mod" "$SCRIPT_DIR/ui.html" "$SCRIPT_DIR/sanitize_domains.txt" "$TMP_SRC/"
+  cp -f "$SCRIPT_DIR"/*.go "$SCRIPT_DIR/go.mod" "$SCRIPT_DIR/ui.html" "$SCRIPT_DIR/sanitize_domains.txt" "$SCRIPT_DIR/block_domains.txt" "$TMP_SRC/"
 else
   LATEST_SHA=$(curl -4 -fsSL --retry 2 -H "Accept: application/vnd.github.sha" -H "Cache-Control: no-cache" \
     "https://api.github.com/repos/${GITHUB_REPO}/commits/${GITHUB_BRANCH}?t=$(date +%s)" 2>/dev/null || echo "")
@@ -129,7 +128,7 @@ else
   curl -4 -fsSL --retry 3 --retry-delay 2 -H "Cache-Control: no-cache" "$TAR_URL" -o "$TMP_TAR"
   tar -xzf "$TMP_TAR" -C "$TMP_EXT" --strip-components=1
 
-  for req_f in go.mod main.go dns.go proxy.go rules.go web.go ui.html sanitize_domains.txt; do
+  for req_f in go.mod main.go dns.go proxy.go rules.go web.go ui.html sanitize_domains.txt block_domains.txt; do
     if [[ ! -f "$TMP_EXT/$req_f" ]]; then
       echo "[XX] Thieu file '$req_f' tren GitHub! Huy cap nhat -> Dich vu cu van chay an toan."
       rm -rf "$TMP_TAR" "$TMP_EXT" "$TMP_SRC"
@@ -137,17 +136,23 @@ else
     fi
   done
 
-  cp -f "$TMP_EXT"/*.go "$TMP_EXT/go.mod" "$TMP_EXT/ui.html" "$TMP_EXT/sanitize_domains.txt" "$TMP_SRC/"
+  cp -f "$TMP_EXT"/*.go "$TMP_EXT/go.mod" "$TMP_EXT/ui.html" "$TMP_EXT/sanitize_domains.txt" "$TMP_EXT/block_domains.txt" "$TMP_SRC/"
   rm -rf "$TMP_TAR" "$TMP_EXT"
 fi
 
-echo "[*] 3/7. Bien dich thu sang ${BIN_PATH}.new (proxy hien tai van chay binh thuong)..."
+echo "[*] 3/7. Bien dich thu sang ${BIN_PATH}.new & kiem tra chong ro ri (--self-test)..."
 if ! (cd "$TMP_SRC" && CGO_ENABLED=0 go build -a -ldflags="-s -w" -o "${BIN_PATH}.new" .); then
   echo "[XX] LOI BIEN DICH! Huy cap nhat -> Dich vu proxy cu van dang chay an toan 100%."
   rm -rf "$TMP_SRC" "${BIN_PATH}.new"
   exit 1
 fi
 chmod +x "${BIN_PATH}.new"
+
+if ! "${BIN_PATH}.new" --self-test --data-dir="${DATA_DIR}"; then
+  echo "[XX] SELF-TEST THAT BAI! Huy cap nhat -> Proxy cu van hoat dong binh thuong."
+  rm -rf "$TMP_SRC" "${BIN_PATH}.new"
+  exit 1
+fi
 rm -rf "$SRC_DIR" && mv "$TMP_SRC" "$SRC_DIR"
 
 echo "[*] 4/7. Toi uu Kernel, Journald (10M), Limits (1M)..."
@@ -265,7 +270,6 @@ EOF
 chmod +x /usr/local/bin/ps-health.tmp
 mv -f /usr/local/bin/ps-health.tmp /usr/local/bin/ps-health
 
-# Dung .tmp + mv -f + khoi { ... } de khong bao gio bi loi tu ghi de file dang chay
 cat << EOF > /usr/local/bin/ps-update.tmp
 #!/usr/bin/env bash
 set -euo pipefail
@@ -317,11 +321,11 @@ def pub_ip():
 def usage():
     print("""Cach dung ps-cli:
   sudo ps-cli info                            -> Xem thong tin & so proxy
-  sudo ps-cli sync-rules                      -> Dong bo list domain an tu GitHub vao RAM (0ms rot mang)
+  sudo ps-cli sync-rules                      -> Dong bo list an & chan tu GitHub vao RAM (0ms rot mang)
   sudo ps-cli diag                            -> Chan doan cong 8888 / tuong lua
   sudo ps-cli set-admin <user> <pass>         -> Dat/doi tai khoan Admin
   sudo ps-cli set-auth <user> <pass>          -> Dat/doi Proxy Auth
-  sudo ps-cli load <file_proxies.txt> [proto] -> Nap list proxy nguon
+  sudo ps-cli load <file_proxies.txt> [proto] -> Nap moi toan bo list proxy nguon
   sudo ps-cli export                          -> Xuat list proxy da boc (1:1 giao thuc)
   sudo ps-cli test [port]                     -> Test ket noi cong (tu nhan dien http/socks5)""")
 
@@ -331,11 +335,10 @@ if len(sys.argv) < 2:
 cmd = sys.argv[1]
 if cmd == "sync-rules":
     subprocess.run(["pkill", "-USR1", "-x", "proxy-shield"], check=True)
-    print("[OK] Da kich hoat dong bo sanitize_domains.txt vao RAM (0ms gian doan proxy)!")
+    print("[OK] Da kich hoat dong bo sanitize & block rules vao RAM (0ms gian doan proxy)!")
     sys.exit(0)
 
 if cmd == "diag":
-    ip = pub_ip()
     try:
         res = urllib.request.urlopen("http://127.0.0.1:8888/api/auth/status", timeout=3).read().decode()
         print(f"[OK] Dashboard (127.0.0.1:8888): DANG CHAY ({res.strip()})")
@@ -346,12 +349,13 @@ if cmd == "diag":
 
 cfg = load_cfg()
 if cmd == "info":
-    lines = [l.strip() for l in cfg.get("proxies_raw", "").splitlines() if l.strip() and not l.strip().startswith("#")]
+    entries = cfg.get("proxy_entries") or []
+    cnt = len(entries) if entries else len([l for l in cfg.get("proxies_raw", "").splitlines() if l.strip() and not l.strip().startswith("#")])
     print(f"VPS Public IP    : {pub_ip()}")
     print(f"Admin User       : {cfg.get('admin_user') or '(Chua tao)'}")
     print(f"Proxy Auth       : {cfg.get('proxy_user')}:{cfg.get('proxy_pass')}")
     print(f"Start Port       : {cfg.get('start_port', 10001)}")
-    print(f"So Proxy Nguon   : {len(lines)}")
+    print(f"So Proxy Nguon   : {cnt}")
 elif cmd == "set-admin":
     if len(sys.argv) < 4: sys.exit("Thieu tham so: sudo ps-cli set-admin <user> <pass>")
     u, p = sys.argv[2].strip(), sys.argv[3].strip()
@@ -370,8 +374,9 @@ elif cmd == "load":
     proto = sys.argv[3] if len(sys.argv) > 3 else cfg.get("default_up_proto", "http")
     with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
         cfg["proxies_raw"] = f.read()
+    cfg["proxy_entries"] = []
     cfg["default_up_proto"] = "socks5" if proto == "socks5" else "http"
-    save_cfg(cfg); print("[OK] Da nap proxy!")
+    save_cfg(cfg); print("[OK] Da nap & dong bo danh sach proxy moi!")
 elif cmd == "export":
     if os.path.exists("/root/wrapped_proxies.txt"):
         print(open("/root/wrapped_proxies.txt").read().strip())
@@ -396,7 +401,6 @@ echo "[*] 7/7. Hoan doi Binary An Toan & Kiem tra Song/Chet (Auto-Rollback)..."
 [[ -f "$BIN_PATH" ]] && cp -f "$BIN_PATH" "${BIN_PATH}.bak"
 mv -f "${BIN_PATH}.new" "$BIN_PATH"
 
-# Tinh GOMEMLIMIT ~70% RAM thuc te cua VPS (an toan tu VPS 1GB den 24GB)
 TOTAL_MEM_MB=$(awk '/MemTotal/{print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 1024)
 GO_MEM_LIMIT=$(( TOTAL_MEM_MB * 70 / 100 ))
 (( GO_MEM_LIMIT < 512 )) && GO_MEM_LIMIT=512
@@ -406,7 +410,7 @@ EXEC_ARGS="--dash-port=${DASH_PORT} --data-dir=${DATA_DIR} --init-admin-user=${I
 
 cat << EOF > "${SVC_PATH}.tmp"
 [Unit]
-Description=ProxyShield v3.0 Gateway & Monitor
+Description=ProxyShield v3.5 Pro Gateway & Anti-Abuse
 After=network-online.target
 Wants=network-online.target
 StartLimitIntervalSec=0
@@ -432,7 +436,6 @@ systemctl daemon-reload
 systemctl enable proxy-shield >/dev/null 2>&1 || true
 systemctl restart proxy-shield
 
-# Kiem tra suc khoe ban moi trong 6 giay, neu loi tu dong Rollback lai ban cu!
 HEALTH_OK=0
 for _ in 1 2 3 4 5 6; do
   if systemctl is-active --quiet proxy-shield && curl -4 -fsS --max-time 2 "http://127.0.0.1:${DASH_PORT}/api/auth/status" >/dev/null 2>&1; then
@@ -453,16 +456,16 @@ fi
 
 PUB_IP=$(curl -4 -s --max-time 3 https://api.ipify.org 2>/dev/null || echo "YOUR_VPS_IP")
 echo "=========================================================================="
-echo " CAP NHAT / CAI DAT AN TOAN THANH CONG PROXYSHIELD v3.0!"
+echo " CAP NHAT / CAI DAT AN TOAN THANH CONG PROXYSHIELD v3.5 PRO!"
 echo "--------------------------------------------------------------------------"
 echo "  URL Dashboard : http://${PUB_IP}:${DASH_PORT}"
 if (( IS_FRESH == 1 )) && [[ -z "$INIT_ADMIN_PASS" ]]; then
   echo "  Khoi tao Admin: Mo link tren de TAO TAI KHOAN & MAT KHAU truc tiep!"
 fi
 echo "  Memory Tuning : GOGC=200 | GOMEMLIMIT=${GO_MEM_LIMIT}MiB (VPS ${TOTAL_MEM_MB}MB RAM)"
-echo "  Lenh Dong Bo  : sudo ps-cli sync-rules  (Cap nhat list an 0ms rot mang)"
+echo "  Lenh Dong Bo  : sudo ps-cli sync-rules  (Cap nhat list an/chan 0ms rot mang)"
 echo "  Lenh Kiem Tra : sudo ps-health"
 echo "  Lenh Update   : sudo ps-update"
-echo "  Lenh Xoa Sach : curl -4 -sSL ... | tr -d '\r' | sudo bash -s -- --purge"
+echo "  Lenh Xoa Sach : sudo bash ... --purge"
 echo "=========================================================================="
 systemctl status proxy-shield --no-pager

@@ -3,11 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ProxyShield v3.0 — Gateway &amp; VPS Monitor</title>
+<title>ProxyShield v3.5 Pro — Smart Gateway &amp; Anti-Abuse</title>
 <style>
   :root {
     --bg: #070b14; --bg2: #0d1322; --card: #111827; --border: #1e293b; --border2: #334155;
-    --text: #f1f5f9; --muted: #94a3b8; --accent: #38bdf8; --green: #22c55e; --red: #ef4444; --amber: #f59e0b;
+    --text: #f1f5f9; --muted: #94a3b8; --accent: #38bdf8; --green: #22c55e; --red: #ef4444; --amber: #f59e0b; --purple: #a78bfa;
   }
   * { box-sizing: border-box; font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }
   body { margin: 0; background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.5; }
@@ -20,14 +20,15 @@
     position: sticky; top: 0; z-index: 30;
   }
   .brand { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-  .brand-title { font-weight: 800; font-size: 17px; color: var(--accent); display: flex; align-items: center; gap: 8px; margin-right: 4px; }
+  .brand-title { font-weight: 800; font-size: 17px; color: var(--accent); margin-right: 4px; }
   .pill { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--bg2); border: 1px solid var(--border); }
-  .pill-green { background: rgba(34,197,94,0.14); color: var(--green); border-color: rgba(34,197,94,0.35); }
-  .pill-blue  { background: rgba(56,189,248,0.14); color: var(--accent); border-color: rgba(56,189,248,0.35); }
-  .pill-amber { background: rgba(245,158,11,0.14); color: var(--amber); border-color: rgba(245,158,11,0.35); }
-  .pill-red   { background: rgba(239,68,68,0.14); color: var(--red); border-color: rgba(239,68,68,0.35); }
+  .pill-green  { background: rgba(34,197,94,0.14); color: var(--green); border-color: rgba(34,197,94,0.35); }
+  .pill-blue   { background: rgba(56,189,248,0.14); color: var(--accent); border-color: rgba(56,189,248,0.35); }
+  .pill-amber  { background: rgba(245,158,11,0.14); color: var(--amber); border-color: rgba(245,158,11,0.35); }
+  .pill-red    { background: rgba(239,68,68,0.14); color: var(--red); border-color: rgba(239,68,68,0.35); }
+  .pill-purple { background: rgba(167,139,250,0.14); color: var(--purple); border-color: rgba(167,139,250,0.35); }
 
-  .container { width: 100%; max-width: 1760px; margin: 0 auto; padding: 18px 24px; }
+  .container { width: 100%; max-width: 1780px; margin: 0 auto; padding: 18px 24px; }
   @media (max-width: 768px) { .container { padding: 12px; } .topbar { padding: 10px 12px; } }
 
   .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 18px; }
@@ -43,36 +44,41 @@
   .meter { height: 7px; background: #1e293b; border-radius: 999px; overflow: hidden; margin-top: 8px; }
   .meter-fill { height: 100%; border-radius: 999px; background: var(--accent); transition: width 0.35s ease; }
 
-  .tabs { display: flex; gap: 8px; margin-bottom: 16px; overflow-x: auto; padding-bottom: 4px; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 16px; overflow-x: auto; padding-bottom: 4px; justify-content: space-between; align-items: center; flex-wrap: wrap; }
+  .tab-group { display: flex; gap: 8px; flex-wrap: wrap; }
   .tab { background: var(--card); border: 1px solid var(--border); color: var(--muted); padding: 10px 18px; border-radius: 9px; cursor: pointer; font-weight: 600; font-size: 13.5px; white-space: nowrap; }
   .tab:hover { color: var(--text); border-color: var(--border2); }
   .tab.active { background: var(--accent); color: #070b14; border-color: var(--accent); font-weight: 700; }
 
-  .btn { background: var(--accent); color: #070b14; border: none; padding: 9px 16px; border-radius: 8px; font-weight: 700; cursor: pointer; font-size: 13px; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .btn { background: var(--accent); color: #070b14; border: none; padding: 9px 15px; border-radius: 8px; font-weight: 700; cursor: pointer; font-size: 13px; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
   .btn:hover { filter: brightness(1.08); }
   .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-  .btn-sm { padding: 5px 10px; font-size: 12px; border-radius: 6px; }
+  .btn-sm { padding: 4px 9px; font-size: 12px; border-radius: 6px; }
   .btn-sec { background: #1e293b; color: var(--text); border: 1px solid var(--border2); }
   .btn-green { background: rgba(34,197,94,0.18); color: var(--green); border: 1px solid rgba(34,197,94,0.4); }
+  .btn-amber { background: rgba(245,158,11,0.18); color: var(--amber); border: 1px solid rgba(245,158,11,0.4); }
   .btn-red { background: rgba(239,68,68,0.18); color: var(--red); border: 1px solid rgba(239,68,68,0.4); }
 
-  input, select, textarea { width: 100%; background: var(--bg2); border: 1px solid var(--border2); color: var(--text); padding: 10px 12px; border-radius: 8px; font-size: 13.5px; outline: none; }
+  input, select, textarea { width: 100%; background: var(--bg2); border: 1px solid var(--border2); color: var(--text); padding: 9px 12px; border-radius: 8px; font-size: 13.5px; outline: none; }
   input:focus, select:focus, textarea:focus { border-color: var(--accent); }
   textarea { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; line-height: 1.5; resize: vertical; }
 
-  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
   .form-group { margin-bottom: 14px; }
   .form-group label { display: block; color: var(--muted); font-size: 12.5px; font-weight: 600; margin-bottom: 5px; }
 
-  .table-wrap { overflow-x: auto; max-height: 520px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg2); }
+  .table-wrap { overflow-x: auto; max-height: 560px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg2); }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; }
-  th { color: var(--muted); font-weight: 700; font-size: 12px; text-transform: uppercase; background: #0f172a; position: sticky; top: 0; z-index: 2; }
+  th, td { padding: 9px 10px; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 700; font-size: 11.5px; text-transform: uppercase; background: #0f172a; position: sticky; top: 0; z-index: 2; }
   tbody tr:hover { background: rgba(56,189,248,0.05); }
   .pager { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; color: var(--muted); font-size: 13px; flex-wrap: wrap; gap: 10px; }
 
   .login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
   .login-box { width: 100%; max-width: 420px; background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 30px; box-shadow: 0 20px 50px rgba(0,0,0,0.5); }
+
+  .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.68); display: flex; align-items: center; justify-content: center; z-index: 50; padding: 16px; }
+  .modal-box { width: 100%; max-width: 480px; background: var(--card); border: 1px solid var(--border2); border-radius: 14px; padding: 24px; }
   .toast { position: fixed; bottom: 24px; right: 24px; background: #0f172a; border: 1px solid var(--accent); color: var(--text); padding: 12px 18px; border-radius: 10px; z-index: 99; font-weight: 600; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
 </style>
 </head>
@@ -80,7 +86,7 @@
 
 <div id="loginView" class="login-wrap hidden">
   <div class="login-box">
-    <h2 id="loginTitle" style="margin:0 0 8px 0;color:var(--accent)">ProxyShield v3.0</h2>
+    <h2 id="loginTitle" style="margin:0 0 8px 0;color:var(--accent)">ProxyShield v3.5 Pro</h2>
     <p id="loginSub" style="color:var(--muted);font-size:13.5px;margin:0 0 20px 0">Đăng nhập hệ thống quản lý Proxy</p>
     <div class="form-group"><label>Tài khoản Admin</label><input id="lu" placeholder="Nhập username..." value="admin"></div>
     <div class="form-group"><label>Mật khẩu</label><input id="lp" type="password" placeholder="Nhập mật khẩu..." onkeydown="if(event.key==='Enter')doLogin()"></div>
@@ -92,11 +98,11 @@
 <div id="appView" class="hidden">
   <div class="topbar">
     <div class="brand">
-      <div class="brand-title"><span>ProxyShield v3.0</span></div>
-      <span id="pubIpBadge" class="pill pill-blue mono">IP VPS: ...</span>
-      <span id="uptimeBadge" class="pill mono">Uptime: ...</span>
+      <div class="brand-title">ProxyShield v3.5 Pro</div>
+      <span id="pubIpBadge" class="pill pill-blue mono">IP: ...</span>
+      <span id="uptimeBadge" class="pill mono">Up: ...</span>
       <span id="autoBadge" class="pill pill-green mono">Auto-Check: 5p</span>
-      <span id="rulesBadge" class="pill pill-green mono">Ẩn: ...</span>
+      <span id="rulesBadge" class="pill pill-purple mono">Ẩn: 0 | Chặn: 0</span>
       <span id="credBadge" class="pill pill-amber mono">Auth: ...</span>
     </div>
     <div style="display:flex;gap:8px;align-items:center">
@@ -106,7 +112,7 @@
   </div>
 
   <div class="container">
-    <!-- THANH ĐO THÔNG SỐ VPS & BANDWIDTH THÁNG -->
+    <!-- HÀNG THÔNG SỐ VPS & BĂNG THÔNG THÁNG -->
     <div class="vps-grid">
       <div class="card">
         <div class="stat-head"><span>CPU &amp; Tải VPS</span><span id="vCpuCores" class="mono">- Core</span></div>
@@ -126,14 +132,14 @@
         <div class="stat-head"><span>Cổng &amp; Sức Khỏe Proxy</span><span id="kActive" class="pill pill-blue" style="padding:1px 7px;font-size:11px">LIVE: 0</span></div>
         <div id="kPorts" class="stat-val">0 cổng</div>
         <div class="meter"><div id="kAliveBar" class="meter-fill" style="width:0%;background:var(--green)"></div></div>
-        <div class="stat-sub"><span id="kHealthSub" style="color:var(--green)">Sống: 0 | Chết: 0</span><span id="kSanSub" class="mono">Đã ẩn: 0</span></div>
+        <div class="stat-sub"><span id="kHealthSub" style="color:var(--green)">Sống: 0 | Chết: 0 | Tắt: 0</span></div>
       </div>
 
       <div class="card">
-        <div class="stat-head"><span>Mạng NIC Thực Tế &amp; Conntrack</span><span id="vConnSub" class="mono">0/0</span></div>
+        <div class="stat-head"><span>Mạng NIC &amp; Bảo Vệ</span><span id="vConnSub" class="mono">0/0</span></div>
         <div id="vNicVal" class="stat-val" style="font-size:17px">↑ 0.0 | ↓ 0.0 Mbps</div>
         <div class="meter"><div id="vConnBar" class="meter-fill" style="width:0%"></div></div>
-        <div class="stat-sub"><span id="kReqsSub">0 reqs</span><span id="kErrSub" style="color:var(--red)">Lỗi: 0</span></div>
+        <div class="stat-sub"><span id="kSanSub" style="color:var(--green)">Ẩn: 0</span><span id="kBlkSub" style="color:var(--amber)">Chặn: 0</span><span id="kErrSub" style="color:var(--red)">Lỗi: 0</span></div>
       </div>
 
       <div class="card">
@@ -144,95 +150,121 @@
       </div>
     </div>
 
-    <!-- 3 TAB TINH GỌN, DỄ HIỂU -->
     <div class="tabs">
-      <button class="tab active" onclick="switchTab('proxies', this)">1. Quản Lý &amp; Bọc Proxy</button>
-      <button class="tab" onclick="switchTab('requests', this)">2. Theo Dõi Request (Logs)</button>
-      <button class="tab" onclick="switchTab('settings', this)">3. Cài Đặt Hệ Thống (All-in-One)</button>
+      <div class="tab-group">
+        <button class="tab active" onclick="switchTab('proxies', this)">1. Quản Lý &amp; Bọc Proxy</button>
+        <button class="tab" onclick="switchTab('requests', this)">2. Theo Dõi Request (Logs)</button>
+        <button class="tab" onclick="switchTab('settings', this)">3. Cài Đặt Hệ Thống (All-in-One)</button>
+      </div>
+      <button id="toggleStudioBtn" class="btn btn-sec btn-sm" onclick="toggleStudio()">Thu gọn / Mở khung Thêm Proxy</button>
     </div>
 
-    <!-- TAB 1: QUẢN LÝ, BỌC 1:1 & AUTO-CHECK -->
+    <!-- TAB 1: QUẢN LÝ & BỌC PROXY THÔNG MINH -->
     <div id="tab-proxies">
-      <div class="split-2" style="margin-bottom:16px">
+      <div id="studioWrap" class="split-2" style="margin-bottom:16px">
         <div class="card">
           <div class="row" style="justify-content:space-between;margin-bottom:8px">
-            <h3 style="margin:0;font-size:16px">Dán Proxy Nguồn Vào Đây</h3>
+            <h3 style="margin:0;font-size:15.5px">Thêm / Nhập Proxy Nguồn</h3>
             <label class="btn btn-sec btn-sm" style="cursor:pointer;margin:0">
               Tải File .txt<input type="file" accept=".txt,.list" style="display:none" onchange="uploadProxyFile(event)">
             </label>
           </div>
           <div class="row">
-            <select id="defUpProto" style="max-width:230px" onchange="analyzeInputBox()">
-              <option value="http">Dòng không ghi prefix &rarr; HTTP</option>
-              <option value="socks5">Dòng không ghi prefix &rarr; SOCKS5</option>
+            <input id="addGroup" placeholder="Nhóm (vd: WS-Acc1)" value="Mac dinh" style="max-width:155px">
+            <input id="addNote" placeholder="Ghi chú (tuỳ chọn)" style="max-width:165px">
+            <select id="defUpProto" style="max-width:185px" onchange="analyzeInputBox()">
+              <option value="http">Ko prefix &rarr; HTTP</option>
+              <option value="socks5">Ko prefix &rarr; SOCKS5</option>
             </select>
-            <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);cursor:pointer">
-              <input type="checkbox" id="chkDedup" checked style="width:auto"> Tự lọc trùng
+            <label style="display:flex;align-items:center;gap:5px;font-size:12.5px;color:var(--muted);cursor:pointer">
+              <input type="checkbox" id="chkDedup" checked style="width:auto"> Lọc trùng
             </label>
             <span id="inCountBadge" class="pill pill-blue mono">0 hợp lệ</span>
           </div>
-          <textarea id="proxiesBox" rows="11" oninput="analyzeInputBox()" placeholder="Dán danh sách proxy (đầu vào giao thức nào giữ nguyên giao thức đó):&#10;http://user:pass@198.12.102.93:40540&#10;socks5://50.114.8.42:5432&#10;50.114.98.199:5432"></textarea>
-          <div class="row" style="margin-top:12px;margin-bottom:0">
-            <button class="btn" onclick="saveProxies()">Lưu, Bọc &amp; Tự Test Ngay</button>
-            <button class="btn btn-green" onclick="startScan('deep')">Check Lại Toàn Bộ Bằng IP VPS</button>
-            <button class="btn btn-red" onclick="removeDead()">Xóa Proxy Chết (DIE)</button>
+          <textarea id="proxiesBox" rows="8" oninput="analyzeInputBox()" placeholder="Dán danh sách proxy mới vào đây (không cần dán lại các con cũ):&#10;http://user:pass@198.12.102.93:40540&#10;socks5://user:pass@38.154.185.97:6370"></textarea>
+          <div class="row" style="margin-top:10px;margin-bottom:0">
+            <button class="btn" onclick="saveProxies('append')">+ Thêm Vào Danh Sách</button>
+            <button class="btn btn-amber" onclick="saveProxies('replace')">Ghi Đè Toàn Bộ</button>
+            <button class="btn btn-green" onclick="startScan('deep')">Check Lại Nhóm/All</button>
           </div>
         </div>
 
         <div class="card">
           <div class="row" style="justify-content:space-between;margin-bottom:8px">
-            <h3 style="margin:0;font-size:16px">Proxy Đã Bọc (Đầu Vào Nào &rarr; Đầu Ra Đó)</h3>
+            <h3 style="margin:0;font-size:15.5px">Xuất Proxy Đã Bọc (Khớp 1:1 Giao Thức)</h3>
             <span id="outCountBadge" class="pill pill-green mono">0 sẵn sàng</span>
           </div>
           <div class="row">
-            <select id="expFilter" style="max-width:240px" onchange="refreshOutputBox()">
-              <option value="all">Xuất tất cả cổng đang chạy</option>
+            <select id="expGroup" style="max-width:190px" onchange="refreshOutputBox()">
+              <option value="ALL">Tất cả nhóm</option>
+            </select>
+            <select id="expFilter" style="max-width:210px" onchange="refreshOutputBox()">
+              <option value="all">Tất cả cổng đang BẬT</option>
               <option value="alive">Chỉ lấy proxy ĐANG SỐNG (LIVE)</option>
               <option value="hide_dead">Ẩn proxy ĐÃ CHẾT (DIE)</option>
             </select>
-            <span style="font-size:12.5px;color:var(--muted)">Khớp 1:1 giao thức gốc (<span class="mono">http&rarr;http</span>, <span class="mono">socks5&rarr;socks5</span>)</span>
           </div>
-          <textarea id="outputBox" rows="11" readonly placeholder="Danh sách proxy đã bọc qua IP VPS này sẽ tự hiện ở đây..."></textarea>
-          <div class="row" style="margin-top:12px;margin-bottom:0">
-            <button class="btn" onclick="copyOutputBox()">Copy Toàn Bộ Danh Sách</button>
-            <button class="btn btn-sec" onclick="downloadOutputBox()">Tải Về File .txt</button>
+          <textarea id="outputBox" rows="8" readonly placeholder="Danh sách proxy đã bọc khớp với bộ lọc ở trên..."></textarea>
+          <div class="row" style="margin-top:10px;margin-bottom:0">
+            <button class="btn" onclick="copyOutputBox()">Copy Danh Sách</button>
+            <button class="btn btn-sec" onclick="downloadOutputBox()">Tải File .txt</button>
+            <button class="btn btn-sec" onclick="refreshOutputBox()">Làm mới</button>
           </div>
         </div>
       </div>
 
-      <!-- BẢNG TRẠNG THÁI & DATA TỪNG CỔNG -->
+      <!-- BẢNG QUẢN TRỊ TỪNG IP -->
       <div class="card">
         <div class="row" style="justify-content:space-between">
           <div class="row" style="margin:0;flex:1">
-            <input id="pq" placeholder="Tìm cổng, IP nguồn, Exit IP..." style="max-width:230px" oninput="portPage=1;lastPortSig='';loadPorts()">
-            <select id="pfilter" style="max-width:165px" onchange="portPage=1;lastPortSig='';loadPorts()">
-              <option value="all">Tất cả cổng</option>
+            <input id="pq" placeholder="Tìm cổng, IP, nhóm, ghi chú..." style="max-width:220px" oninput="debouncedLoadPorts()">
+            <select id="pgroup" style="max-width:155px" onchange="portPage=1;lastPortSig='';loadPorts()">
+              <option value="ALL">Tất cả nhóm</option>
+            </select>
+            <select id="pfilter" style="max-width:155px" onchange="portPage=1;lastPortSig='';loadPorts()">
+              <option value="all">Mọi trạng thái</option>
               <option value="alive">Đang SỐNG (LIVE)</option>
               <option value="dead">Bị CHẾT (DIE)</option>
-              <option value="untested">Chờ kiểm tra</option>
+              <option value="disabled">Đang TẮT</option>
+              <option value="untested">Chờ test</option>
               <option value="err">Có lỗi kết nối</option>
+              <option value="blocked">Có request bị chặn</option>
             </select>
-            <select id="psort" style="max-width:175px" onchange="portPage=1;lastPortSig='';loadPorts()">
+            <select id="psort" style="max-width:165px" onchange="portPage=1;lastPortSig='';loadPorts()">
               <option value="port">Sắp xếp: Số cổng</option>
               <option value="traffic">Sắp xếp: Data cao</option>
               <option value="err">Sắp xếp: Nhiều lỗi</option>
               <option value="latency">Sắp xếp: Ping cao</option>
             </select>
-            <button class="btn btn-red btn-sm" onclick="resetPortData(0)">Reset Tất Cả Data</button>
           </div>
-          <div id="scanProgressRow" class="row hidden" style="margin:0;min-width:260px">
-            <span id="scanText" class="mono" style="font-size:12px">Đang test: 0/0</span>
+          <div id="scanProgressRow" class="row hidden" style="margin:0;min-width:250px">
+            <span id="scanText" class="mono" style="font-size:12px">Test: 0/0</span>
             <div class="meter" style="flex:1;margin:0"><div id="scanBar" class="meter-fill" style="background:var(--green);width:0%"></div></div>
             <button class="btn btn-red btn-sm" onclick="stopScan()">Dừng</button>
           </div>
         </div>
+
+        <!-- THANH THAO TÁC HÀNG LOẠT -->
+        <div class="row" style="background:var(--bg2);padding:8px 12px;border-radius:8px;border:1px solid var(--border)">
+          <span id="selCountText" class="mono" style="font-size:12px;color:var(--muted)">Đã chọn: 0</span>
+          <button class="btn btn-green btn-sm" onclick="bulkAction('enable')">Bật Đã Chọn</button>
+          <button class="btn btn-amber btn-sm" onclick="bulkAction('disable')">Tắt Đã Chọn</button>
+          <button class="btn btn-sec btn-sm" onclick="bulkSetGroup()">Đổi Nhóm Đã Chọn</button>
+          <button class="btn btn-red btn-sm" onclick="bulkAction('delete_selected')">Xóa Đã Chọn</button>
+          <span style="border-left:1px solid var(--border2);height:18px;margin:0 4px"></span>
+          <button class="btn btn-red btn-sm" onclick="bulkAction('delete_dead')">Xóa Toàn Bộ DIE</button>
+          <button class="btn btn-sec btn-sm" onclick="bulkAction('reindex')">Đánh Lại Số Cổng</button>
+          <button class="btn btn-red btn-sm" onclick="resetPortData(0)">Reset Tất Cả Data</button>
+        </div>
+
         <div class="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Cổng VPS</th><th>Proxy Nguồn</th><th>Loại</th><th>Trạng thái (Check IP VPS)</th><th>Ping</th>
-                <th>Exit IP Thực Tế</th><th>Đang chạy</th><th>Lượt Req</th><th>Đã ẩn</th><th>Lỗi</th>
-                <th>Tổng Data</th><th>Up / Down</th><th>Chi tiết lỗi</th><th>Thao tác</th>
+                <th><input type="checkbox" id="chkAll" style="width:auto" onclick="toggleSelectAll(this)"></th>
+                <th>Cổng</th><th>Nhóm / Ghi chú</th><th>Proxy Nguồn</th><th>Loại</th><th>Trạng thái</th>
+                <th>Ping</th><th>Exit IP</th><th>Live</th><th>Req / Ẩn / Chặn / Lỗi</th>
+                <th>Tổng Data</th><th>Up / Down</th><th>Chi tiết lỗi</th><th>Thao tác IP</th>
               </tr>
             </thead>
             <tbody id="portBody"></tbody>
@@ -252,16 +284,17 @@
     <!-- TAB 2: THEO DÕI REQUEST (LOGS) -->
     <div id="tab-requests" class="card hidden">
       <div class="row">
-        <input id="fq" placeholder="Tìm domain, IP, cổng, lỗi..." style="max-width:250px" oninput="lastReqSig='';loadRequests()">
-        <select id="fact" style="max-width:190px" onchange="lastReqSig='';loadRequests()">
+        <input id="fq" placeholder="Tìm domain, IP, cổng, lý do..." style="max-width:250px" oninput="lastReqSig='';loadRequests()">
+        <select id="fact" style="max-width:210px" onchange="lastReqSig='';loadRequests()">
           <option value="ALL">Tất cả Request</option>
           <option value="LIVE">Đang chạy (LIVE)</option>
           <option value="SANITIZED">Đã ẩn thành IP (DoH)</option>
+          <option value="BLK">Đã chặn Abuse / Port (BLK)</option>
           <option value="DIRECT">Giữ nguyên Domain</option>
           <option value="ERR">Bị lỗi (ERR)</option>
         </select>
         <input id="fport" placeholder="Cổng (10001)" style="max-width:120px" oninput="lastReqSig='';loadRequests()">
-        <button class="btn btn-green" onclick="syncRulesNow()">Cập Nhật List Ẩn GitHub</button>
+        <button class="btn btn-green" onclick="syncRulesNow()">Đồng Bộ List Ẩn &amp; Chặn GitHub</button>
         <button class="btn btn-sec" onclick="exportCSV()">Tải CSV</button>
         <button class="btn btn-red" onclick="clearLogs()">Xóa lịch sử</button>
       </div>
@@ -270,8 +303,8 @@
           <thead>
             <tr>
               <th>Thời gian</th><th>Cổng</th><th>IP Gọi Vào</th><th>Domain Gốc</th>
-              <th>Đích Gửi Sang Nguồn</th><th>Ẩn Domain?</th><th>Giao thức</th>
-              <th>Dung lượng</th><th>Thời lượng</th><th>Kết quả</th><th>Thao tác nhanh</th>
+              <th>Đích Gửi Sang Nguồn</th><th>Bảo vệ</th><th>Giao thức</th>
+              <th>Dung lượng</th><th>Thời lượng</th><th>Kết quả / Lý do</th><th>Thao tác nhanh</th>
             </tr>
           </thead>
           <tbody id="reqBody"></tbody>
@@ -280,8 +313,8 @@
     </div>
 
     <!-- TAB 3: CÀI ĐẶT ALL-IN-ONE & BACKUP -->
-    <div id="tab-settings" class="card hidden" style="max-width:880px">
-      <h3 style="margin-top:0">Cài Đặt Toàn Bộ Hệ Thống (Lưu Tự Động Chống Mất Khi Reboot)</h3>
+    <div id="tab-settings" class="card hidden" style="max-width:920px">
+      <h3 style="margin-top:0">Cài Đặt Toàn Bộ Hệ Thống (Lưu Nguyên Tử Chống Mất Khi Reboot)</h3>
       <div class="split-2">
         <div class="form-group"><label>Tài khoản Proxy (Username)</label><input id="sProxyUser"></div>
         <div class="form-group">
@@ -294,8 +327,16 @@
         <div class="form-group"><label>Tự động Check Live mỗi (phút) — 0 để tắt</label><input id="sAutoCheck" type="number" min="0" max="1440"></div>
       </div>
       <div class="split-2">
-        <div class="form-group"><label>Hạn mức Bandwidth Tháng (TB) — 10 cho Oracle Free, 0 = Không giới hạn</label><input id="sQuotaTB" type="number" step="0.5" min="0"></div>
-        <div class="form-group"><label>Từ khóa Ẩn BỔ SUNG riêng (danh sách chuẩn tự sync từ sanitize_domains.txt)</label><input id="sKeywords" placeholder="vd: mydomain1, mydomain2"></div>
+        <div class="form-group"><label>Hạn mức Bandwidth Tháng (TB) — 10 cho Oracle Free, 0 = Unlimited</label><input id="sQuotaTB" type="number" step="0.5" min="0"></div>
+        <div class="form-group" style="display:flex;align-items:center;padding-top:22px">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;color:var(--text);font-size:13.5px;margin:0">
+            <input type="checkbox" id="sBlockPorts" style="width:auto"> Chặn Cổng Nguy Hiểm (SMTP/25, SSH/22, RDP/3389, SMB/445, DB)
+          </label>
+        </div>
+      </div>
+      <div class="split-2">
+        <div class="form-group"><label>Từ khóa ẨN bổ sung (tự gộp với sanitize_domains.txt)</label><input id="sSanKeywords" placeholder="vd: customapp1, customapp2"></div>
+        <div class="form-group"><label>Từ khóa CHẶN ABUSE bổ sung (tự gộp với block_domains.txt)</label><input id="sBlkKeywords" placeholder="vd: spamdomain.com, .casino"></div>
       </div>
       <hr style="border:0;border-top:1px solid var(--border);margin:18px 0">
       <h4 style="margin-top:0">Tài Khoản Admin Đăng Nhập Web</h4>
@@ -305,7 +346,7 @@
       </div>
       <div class="row" style="margin-top:10px">
         <button class="btn" onclick="saveSettings()">Lưu Toàn Bộ Cài Đặt</button>
-        <button class="btn btn-green" onclick="syncRulesNow()">Cập Nhật List Ẩn GitHub (Không Restart)</button>
+        <button class="btn btn-green" onclick="syncRulesNow()">Đồng Bộ Rules GitHub (0ms)</button>
         <a class="btn btn-sec" href="/api/backup" style="text-decoration:none">Tải Backup (.json)</a>
         <label class="btn btn-sec" style="cursor:pointer;margin:0">
           Khôi Phục Backup (.json)<input type="file" accept=".json" style="display:none" onchange="restoreBackup(event)">
@@ -315,11 +356,25 @@
   </div>
 </div>
 
+<!-- MODAL SỬA NHANH 1 IP -->
+<div id="editModal" class="modal-bg hidden">
+  <div class="modal-box">
+    <h3 style="margin-top:0;color:var(--accent)">Sửa Proxy Cổng <span id="emPort" class="mono"></span></h3>
+    <div class="form-group"><label>Proxy Nguồn Mới (giữ nguyên số cổng VPS đang cấp)</label><input id="emUp" class="mono"></div>
+    <div class="form-group"><label>Nhóm (Group)</label><input id="emGrp"></div>
+    <div class="form-group"><label>Ghi chú</label><input id="emNote"></div>
+    <div class="row" style="justify-content:flex-end;margin-bottom:0">
+      <button class="btn btn-sec" onclick="closeEditModal()">Hủy</button>
+      <button class="btn" onclick="saveEditEntry()">Lưu Thay Đổi</button>
+    </div>
+  </div>
+</div>
+
 <div id="toast" class="toast hidden"></div>
 
 <script>
 var paused = false, currentTab = 'proxies', portPage = 1, portTotal = 0;
-var lastPortSig = '', lastReqSig = '';
+var lastPortSig = '', lastReqSig = '', selPorts = {}, editTargetPort = 0, searchTimer = null;
 
 function toast(msg) {
   var el = document.getElementById('toast');
@@ -337,8 +392,7 @@ function fmtBytes(b) {
 function fmtDataMBGB(b) {
   if (!b || b <= 0) return '0.0 MB';
   var mb = b / 1048576;
-  if (mb < 1024) return mb.toFixed(1) + ' MB';
-  return (mb / 1024).toFixed(2) + ' GB';
+  return mb < 1024 ? mb.toFixed(1) + ' MB' : (mb / 1024).toFixed(2) + ' GB';
 }
 function fmtUptime(s) {
   s = Math.max(0, s || 0);
@@ -361,12 +415,17 @@ function genRandomPass() {
   for (var i = 0; i < 14; i++) r += c.charAt(Math.floor(Math.random() * c.length));
   document.getElementById('sProxyPass').value = r;
 }
+function toggleStudio() { document.getElementById('studioWrap').classList.toggle('hidden'); }
+function debouncedLoadPorts() {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(function() { portPage = 1; lastPortSig = ''; loadPorts(); }, 250);
+}
 
 async function checkAuthStatus() {
   try {
     var d = await (await fetch('/api/auth/status')).json();
     var s = !!d.setup_required;
-    document.getElementById('loginTitle').textContent = s ? 'Tạo Tài Khoản Admin Lần Đầu' : 'ProxyShield v3.0';
+    document.getElementById('loginTitle').textContent = s ? 'Tạo Tài Khoản Admin Lần Đầu' : 'ProxyShield v3.5 Pro';
     document.getElementById('loginSub').textContent = s ? 'Nhập Username & Mật khẩu bạn muốn tạo để đăng nhập:' : 'Đăng nhập hệ thống quản lý Proxy';
     document.getElementById('loginBtn').textContent = s ? 'Tạo Tài Khoản & Đăng Nhập' : 'Đăng nhập';
     if (s && document.getElementById('lu').value === 'admin') document.getElementById('lu').value = '';
@@ -401,20 +460,31 @@ function switchTab(name, btn) {
   ['proxies', 'requests', 'settings'].forEach(function(id) {
     document.getElementById('tab-' + id).classList.toggle('hidden', id !== name);
   });
+  document.getElementById('toggleStudioBtn').classList.toggle('hidden', name !== 'proxies');
   if (name === 'proxies') { lastPortSig = ''; loadPorts(); refreshOutputBox(); }
   if (name === 'requests') { lastReqSig = ''; loadRequests(); }
   if (name === 'settings') loadConfig();
+}
+
+function syncGroupDropdowns(groups) {
+  ['pgroup', 'expGroup'].forEach(function(id) {
+    var sel = document.getElementById(id), cur = sel.value || 'ALL';
+    var opts = '<option value="ALL">Tất cả nhóm</option>';
+    (groups || []).forEach(function(g) { opts += '<option value="' + esc(g) + '">' + esc(g) + '</option>'; });
+    if (sel.innerHTML !== opts) { sel.innerHTML = opts; sel.value = cur; if (!sel.value) sel.value = 'ALL'; }
+  });
 }
 
 async function loadOverview() {
   try {
     var d = await (await api('/api/overview')).json();
     var v = d.vps || {};
-    document.getElementById('pubIpBadge').textContent = 'IP VPS: ' + d.public_ip;
-    document.getElementById('uptimeBadge').textContent = 'Uptime: ' + fmtUptime(v.vps_uptime_sec);
+    document.getElementById('pubIpBadge').textContent = 'IP: ' + d.public_ip;
+    document.getElementById('uptimeBadge').textContent = 'Up: ' + fmtUptime(v.vps_uptime_sec);
     document.getElementById('autoBadge').textContent = d.auto_check_min > 0 ? ('Auto-Check: ' + d.auto_check_min + 'p') : 'Auto-Check: Tắt';
-    document.getElementById('rulesBadge').textContent = 'Ẩn: ' + (d.rules_count || 0) + ' (' + (d.rules_last_sync || '-') + ')';
+    document.getElementById('rulesBadge').textContent = 'Ẩn: ' + (d.rules_sanitize_cnt || 0) + ' | Chặn: ' + (d.rules_block_cnt || 0) + ' (' + (d.rules_last_sync || '-') + ')';
     document.getElementById('credBadge').textContent = 'Auth: ' + d.proxy_user + ':' + d.proxy_pass;
+    syncGroupDropdowns(d.groups || []);
 
     var cpu = v.cpu_pct || 0;
     document.getElementById('vCpuCores').textContent = (v.cpu_cores || 1) + ' Core';
@@ -432,18 +502,18 @@ async function loadOverview() {
     document.getElementById('vRamPct').textContent = mPct.toFixed(1) + '% RAM';
     document.getElementById('vFdsSub').textContent = 'FDs: ' + (v.open_fds || 0);
 
-    var pTot = d.proxy_count || 0, pAlive = d.alive_ports || 0, pDead = d.dead_ports || 0;
+    var pRun = d.proxy_count || 0, pTot = d.proxy_total || 0, pAlive = d.alive_ports || 0, pDead = d.dead_ports || 0, pOff = d.disabled_count || 0;
     document.getElementById('kActive').textContent = 'LIVE: ' + (d.active_conns || 0);
-    document.getElementById('kPorts').textContent = pTot + ' cổng';
-    document.getElementById('kAliveBar').style.width = (pTot > 0 ? (pAlive / pTot) * 100 : 0).toFixed(1) + '%';
-    document.getElementById('kHealthSub').textContent = 'Sống: ' + pAlive + ' | Chết: ' + pDead;
-    document.getElementById('kSanSub').textContent = 'Đã ẩn: ' + (d.total_sanitized || 0).toLocaleString();
+    document.getElementById('kPorts').textContent = pRun + ' / ' + pTot + ' cổng';
+    document.getElementById('kAliveBar').style.width = (pRun > 0 ? (pAlive / pRun) * 100 : 0).toFixed(1) + '%';
+    document.getElementById('kHealthSub').textContent = 'Sống: ' + pAlive + ' | Chết: ' + pDead + ' | Tắt: ' + pOff;
 
     document.getElementById('vNicVal').textContent = '↑ ' + (v.nic_tx_mbps || 0).toFixed(2) + ' | ↓ ' + (v.nic_rx_mbps || 0).toFixed(2) + ' Mbps';
     var cCur = v.conntrack_cur || 0, cMax = v.conntrack_max || 1;
     document.getElementById('vConnSub').textContent = cCur.toLocaleString() + '/' + cMax.toLocaleString();
     document.getElementById('vConnBar').style.width = Math.min(100, (cCur / cMax) * 100).toFixed(2) + '%';
-    document.getElementById('kReqsSub').textContent = (d.total_reqs || 0).toLocaleString() + ' reqs';
+    document.getElementById('kSanSub').textContent = 'Ẩn: ' + (d.total_sanitized || 0).toLocaleString();
+    document.getElementById('kBlkSub').textContent = 'Chặn: ' + (d.total_blocked || 0).toLocaleString();
     document.getElementById('kErrSub').textContent = 'Lỗi: ' + (d.total_errors || 0).toLocaleString();
 
     var mTx = v.month_tx_bytes || 0, mRx = v.month_rx_bytes || 0, qTB = d.quota_tb || 0, qPct = d.quota_pct || 0;
@@ -465,7 +535,7 @@ async function loadOverview() {
     if (sc.running) {
       pRow.classList.remove('hidden');
       var pct = sc.total > 0 ? Math.round((sc.done / sc.total) * 100) : 0;
-      document.getElementById('scanText').textContent = 'Auto-Test: ' + sc.done + '/' + sc.total + ' (' + pct + '%)';
+      document.getElementById('scanText').textContent = 'Test: ' + sc.done + '/' + sc.total + ' (' + pct + '%)';
       document.getElementById('scanBar').style.width = pct + '%';
     } else {
       pRow.classList.add('hidden');
@@ -473,12 +543,26 @@ async function loadOverview() {
   } catch (e) {}
 }
 
+function updateSelCount() {
+  var cnt = Object.keys(selPorts).filter(function(k){ return selPorts[k]; }).length;
+  document.getElementById('selCountText').textContent = 'Đã chọn: ' + cnt;
+}
+function toggleRowCheck(port, el) { selPorts[port] = el.checked; updateSelCount(); }
+function toggleSelectAll(master) {
+  document.querySelectorAll('.row-chk').forEach(function(cb) {
+    cb.checked = master.checked;
+    selPorts[parseInt(cb.value, 10)] = master.checked;
+  });
+  updateSelCount();
+}
+
 async function loadPorts() {
   if (currentTab !== 'proxies' || isSelecting()) return;
   try {
     var qs = new URLSearchParams({
-      q: document.getElementById('pq').value, filter: document.getElementById('pfilter').value,
-      sort: document.getElementById('psort').value, page: String(portPage), limit: '50'
+      q: document.getElementById('pq').value, group: document.getElementById('pgroup').value,
+      filter: document.getElementById('pfilter').value, sort: document.getElementById('psort').value,
+      page: String(portPage), limit: '50'
     });
     var txt = await (await api('/api/ports?' + qs.toString())).text();
     if (txt === lastPortSig) return;
@@ -490,43 +574,120 @@ async function loadPorts() {
     var html = '';
     (d.rows || []).forEach(function(p) {
       var hb = '<span class="pill pill-amber" style="padding:2px 8px">Chờ test</span>';
-      if (p.health === 'alive') hb = '<span class="pill pill-green" style="padding:2px 8px">LIVE</span>';
+      if (!p.enabled) hb = '<span class="pill" style="padding:2px 8px;color:var(--muted)">ĐANG TẮT</span>';
+      else if (p.health === 'alive') hb = '<span class="pill pill-green" style="padding:2px 8px">LIVE</span>';
       else if (p.health === 'dead') hb = '<span class="pill pill-red" style="padding:2px 8px">DIE</span>';
+
       var totB = (p.bytes_up || 0) + (p.bytes_down || 0);
-      html += '<tr>' +
+      var chk = selPorts[p.port] ? 'checked' : '';
+      var tgLabel = p.enabled ? 'Tắt' : 'Bật';
+      var tgCls = p.enabled ? 'btn-amber' : 'btn-green';
+
+      html += '<tr style="' + (p.enabled ? '' : 'opacity:0.6') + '">' +
+        '<td><input type="checkbox" class="row-chk" value="' + p.port + '" ' + chk + ' style="width:auto" onclick="toggleRowCheck(' + p.port + ',this)"></td>' +
         '<td class="mono"><b>:' + p.port + '</b></td>' +
+        '<td><span class="pill pill-purple" style="padding:1px 7px">' + esc(p.group) + '</span>' + (p.note ? ' <span style="font-size:11.5px;color:var(--muted)">' + esc(p.note) + '</span>' : '') + '</td>' +
         '<td class="mono">' + esc(p.upstream) + '</td>' +
-        '<td><span class="pill pill-blue" style="padding:2px 8px">' + esc(p.proto.toUpperCase()) + '</span></td>' +
+        '<td><span class="pill pill-blue" style="padding:2px 7px">' + esc(p.proto.toUpperCase()) + '</span></td>' +
         '<td>' + hb + '</td>' +
         '<td class="mono">' + (p.latency_ms ? p.latency_ms + 'ms' : '-') + '</td>' +
         '<td class="mono" style="color:var(--accent)">' + esc(p.exit_ip || '-') + '</td>' +
         '<td class="mono">' + p.active_conns + '</td>' +
-        '<td class="mono">' + p.total_reqs + '</td>' +
-        '<td class="mono" style="color:var(--green)">' + p.sanitized_reqs + '</td>' +
-        '<td class="mono" style="color:var(--red)">' + p.error_reqs + '</td>' +
+        '<td class="mono">' + p.total_reqs + ' / <span style="color:var(--green)">' + p.sanitized_reqs + '</span> / <span style="color:var(--amber)">' + p.blocked_reqs + '</span> / <span style="color:var(--red)">' + p.error_reqs + '</span></td>' +
         '<td class="mono"><b style="color:var(--accent)">' + fmtDataMBGB(totB) + '</b></td>' +
         '<td class="mono" style="color:var(--muted);font-size:12px">' + fmtBytes(p.bytes_up) + ' / ' + fmtBytes(p.bytes_down) + '</td>' +
-        '<td style="color:var(--red);max-width:180px;overflow:hidden;text-overflow:ellipsis">' + esc(p.last_err) + '</td>' +
-        '<td style="display:flex;gap:5px"><button class="btn btn-sec btn-sm" onclick="testOnePort(' + p.port + ')">Test</button><button class="btn btn-red btn-sm" onclick="resetPortData(' + p.port + ')">Reset</button></td>' +
+        '<td style="color:var(--red);max-width:170px;overflow:hidden;text-overflow:ellipsis">' + esc(p.last_err) + '</td>' +
+        '<td style="display:flex;gap:4px">' +
+          '<button class="btn btn-sm ' + tgCls + '" onclick="entryAct(' + p.port + ',\'toggle\')">' + tgLabel + '</button>' +
+          '<button class="btn btn-sec btn-sm" onclick="openEditModal(' + p.port + ',\'' + esc(p.upstream_full) + '\',\'' + esc(p.group) + '\',\'' + esc(p.note) + '\')">Sửa</button>' +
+          '<button class="btn btn-sec btn-sm" onclick="testOnePort(' + p.port + ')">Test</button>' +
+          '<button class="btn btn-sec btn-sm" onclick="resetPortData(' + p.port + ')">0MB</button>' +
+          '<button class="btn btn-red btn-sm" onclick="entryAct(' + p.port + ',\'delete\')">Xóa</button>' +
+        '</td>' +
         '</tr>';
     });
-    document.getElementById('portBody').innerHTML = html || '<tr><td colspan="14" style="text-align:center;color:var(--muted);padding:20px">Chưa có proxy nào. Hãy dán proxy vào ô phía trên và bấm Lưu!</td></tr>';
+    document.getElementById('portBody').innerHTML = html || '<tr><td colspan="14" style="text-align:center;color:var(--muted);padding:20px">Chưa có proxy nào. Hãy dán proxy vào khung trên và bấm "+ Thêm Vào Danh Sách"!</td></tr>';
   } catch (e) {}
 }
 
-async function resetPortData(port) {
-  var msg = port > 0 ? ('Reset số liệu Data của cổng :' + port + '?') : 'Reset toàn bộ số liệu MB/GB của TẤT CẢ các cổng?';
-  if (!confirm(msg)) return;
-  await api('/api/ports/reset', {
+async function entryAct(port, action) {
+  if (action === 'delete' && !confirm('Xóa hẳn proxy cổng :' + port + '?')) return;
+  await api('/api/proxies/entry', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({port: port})
+    body: JSON.stringify({port: port, action: action})
   });
-  toast(port > 0 ? ('Đã reset data cổng :' + port) : 'Đã reset toàn bộ data proxy!');
+  toast(action === 'delete' ? ('Đã xóa cổng :' + port) : ('Đã cập nhật trạng thái :' + port));
+  lastPortSig = ''; loadPorts(); loadOverview(); refreshOutputBox();
+}
+
+function openEditModal(port, upFull, grp, note) {
+  editTargetPort = port;
+  document.getElementById('emPort').textContent = ':' + port;
+  document.getElementById('emUp').value = upFull;
+  document.getElementById('emGrp').value = grp;
+  document.getElementById('emNote').value = note;
+  document.getElementById('editModal').classList.remove('hidden');
+}
+function closeEditModal() { document.getElementById('editModal').classList.add('hidden'); }
+async function saveEditEntry() {
+  var r = await api('/api/proxies/entry', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      port: editTargetPort, action: 'edit',
+      upstream_line: document.getElementById('emUp').value,
+      group: document.getElementById('emGrp').value,
+      note: document.getElementById('emNote').value
+    })
+  });
+  var d = await r.json();
+  if (!r.ok) { toast(d.error || 'Lỗi sửa proxy'); return; }
+  closeEditModal();
+  toast('Đã cập nhật cổng :' + editTargetPort + ' & tự động test lại!');
+  lastPortSig = ''; loadPorts(); loadOverview(); refreshOutputBox();
+}
+
+async function bulkAction(action) {
+  var ports = Object.keys(selPorts).filter(function(k){ return selPorts[k]; }).map(function(k){ return parseInt(k, 10); });
+  if ((action === 'enable' || action === 'disable' || action === 'delete_selected') && ports.length === 0) {
+    toast('Hãy tick chọn ít nhất 1 cổng trước!'); return;
+  }
+  if (action === 'delete_selected' && !confirm('Xóa ' + ports.length + ' proxy đã chọn?')) return;
+  if (action === 'delete_dead' && !confirm('Xóa toàn bộ proxy đang bị DIE?')) return;
+  if (action === 'reindex' && !confirm('Đánh lại số cổng liên tục từ Start Port? (Sẽ làm thay đổi số cổng của một số proxy đang chạy)')) return;
+
+  var d = await (await api('/api/proxies/bulk', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({action: action, ports: ports})
+  })).json();
+  selPorts = {}; document.getElementById('chkAll').checked = false; updateSelCount();
+  toast('Đã xử lý xong ' + (d.affected || 0) + ' cổng!');
+  lastPortSig = ''; loadPorts(); loadOverview(); refreshOutputBox();
+}
+
+async function bulkSetGroup() {
+  var ports = Object.keys(selPorts).filter(function(k){ return selPorts[k]; }).map(function(k){ return parseInt(k, 10); });
+  if (ports.length === 0) { toast('Hãy tick chọn ít nhất 1 cổng trước!'); return; }
+  var grp = prompt('Nhập tên Nhóm mới cho ' + ports.length + ' cổng đã chọn:');
+  if (!grp || !grp.trim()) return;
+  await api('/api/proxies/bulk', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({action: 'set_group', ports: ports, group: grp.trim()})
+  });
+  selPorts = {}; document.getElementById('chkAll').checked = false; updateSelCount();
+  toast('Đã chuyển ' + ports.length + ' cổng sang nhóm "' + grp.trim() + '"!');
+  lastPortSig = ''; loadPorts(); loadOverview();
+}
+
+async function resetPortData(port) {
+  var msg = port > 0 ? ('Reset số liệu Data cổng :' + port + '?') : 'Reset toàn bộ số liệu MB/GB của TẤT CẢ cổng?';
+  if (!confirm(msg)) return;
+  await api('/api/ports/reset', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({port: port})});
+  toast(port > 0 ? ('Đã reset data :' + port) : 'Đã reset toàn bộ data!');
   lastPortSig = ''; loadPorts(); loadOverview();
 }
 
 async function testOnePort(port) {
-  toast('Đang kiểm tra cổng :' + port + '...');
+  toast('Đang test cổng :' + port + '...');
   var d = await (await api('/api/ports/test', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({port: port, mode: 'deep'})
@@ -548,44 +709,51 @@ async function loadRequests() {
     var d = JSON.parse(txt);
     var html = '';
     (d.rows || []).forEach(function(row) {
-      var mb = row.sanitized ? '<span class="pill pill-green" style="padding:2px 8px">ĐÃ ẨN (IP)</span>' : '<span class="pill pill-blue" style="padding:2px 8px">GIỮ NGUYÊN</span>';
+      var mb = '<span class="pill pill-blue" style="padding:2px 8px">GIỮ NGUYÊN</span>';
+      if (row.status === 'BLK') mb = '<span class="pill pill-amber" style="padding:2px 8px">ĐÃ CHẶN</span>';
+      else if (row.sanitized) mb = '<span class="pill pill-green" style="padding:2px 8px">ĐÃ ẨN (IP)</span>';
+
       var sb = '<span class="pill pill-green" style="padding:2px 8px">OK</span>';
       if (row.status === 'LIVE') sb = '<span class="pill pill-amber" style="padding:2px 8px">LIVE</span>';
+      else if (row.status === 'BLK') sb = '<span class="pill pill-amber" style="padding:2px 8px">' + esc(row.error || 'BLOCKED') + '</span>';
       else if (row.status === 'ERR') sb = '<span class="pill pill-red" style="padding:2px 8px">ERR: ' + esc(row.error) + '</span>';
+
       var domOnly = row.orig_target.split(':')[0];
-      var hideBtn = row.sanitized ? '<span style="color:var(--muted);font-size:12px">Đã ẩn</span>' : '<button class="btn btn-green btn-sm" onclick="quickSanitize(\'' + esc(domOnly) + '\')">+ Ẩn Domain</button>';
+      var actBtns = (row.sanitized || row.status === 'BLK')
+        ? '<span style="color:var(--muted);font-size:12px">Đã xử lý</span>'
+        : '<div style="display:flex;gap:4px"><button class="btn btn-green btn-sm" onclick="quickRule(\'' + esc(domOnly) + '\',\'sanitize\')">+ Ẩn</button><button class="btn btn-red btn-sm" onclick="quickRule(\'' + esc(domOnly) + '\',\'block\')">Chặn</button></div>';
+
       html += '<tr>' +
         '<td class="mono" style="color:var(--muted)">' + esc(row.time) + '</td>' +
         '<td class="mono"><b>:' + row.port + '</b></td>' +
         '<td class="mono">' + esc(row.client_ip) + '</td>' +
         '<td class="mono">' + esc(row.orig_target) + '</td>' +
-        '<td class="mono" style="color:' + (row.sanitized ? 'var(--green)' : 'var(--text)') + '">' + esc(row.sent_target) + '</td>' +
+        '<td class="mono" style="color:' + (row.sanitized ? 'var(--green)' : (row.status === 'BLK' ? 'var(--amber)' : 'var(--text)')) + '">' + esc(row.sent_target) + '</td>' +
         '<td>' + mb + '</td>' +
         '<td>' + esc(row.protocol) + '</td>' +
         '<td class="mono">' + (row.status === 'LIVE' ? 'đang truyền...' : fmtBytes(row.bytes_up) + ' / ' + fmtBytes(row.bytes_down)) + '</td>' +
         '<td class="mono">' + (row.duration_ms < 1000 ? row.duration_ms + 'ms' : (row.duration_ms / 1000).toFixed(2) + 's') + '</td>' +
         '<td>' + sb + '</td>' +
-        '<td>' + hideBtn + '</td>' +
+        '<td>' + actBtns + '</td>' +
         '</tr>';
     });
     document.getElementById('reqBody').innerHTML = html || '<tr><td colspan="11" style="text-align:center;color:var(--muted);padding:20px">Chưa có request nào.</td></tr>';
   } catch (e) {}
 }
 
-async function quickSanitize(domain) {
-  if (!domain || /^\d+\.\d+\.\d+\.\d+$/.test(domain)) { toast('Đây đã là IP thuần rồi!'); return; }
-  var parts = domain.split('.');
-  var kw = parts.length >= 2 ? parts.slice(-2).join('.') : domain;
-  await api('/api/domains/sanitize', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({keyword: kw})});
-  toast('Đã thêm "' + kw + '" vào danh sách tự động ẩn!');
+async function quickRule(domain, mode) {
+  if (!domain || /^\d+\.\d+\.\d+\.\d+$/.test(domain)) { toast('Đây là địa chỉ IP, không phải domain!'); return; }
+  var parts = domain.split('.'), kw = parts.length >= 2 ? parts.slice(-2).join('.') : domain;
+  await api('/api/rules/add', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({keyword: kw, mode: mode})});
+  toast((mode === 'block' ? 'Đã CHẶN hẳn "' : 'Đã ẨN thành IP "') + kw + '"!');
   lastReqSig = ''; loadRequests(); loadOverview();
 }
 
 async function syncRulesNow() {
   var r = await api('/api/rules/sync', {method: 'POST'});
   var d = await r.json();
-  if (!r.ok) { toast(d.error || 'Lỗi đồng bộ danh sách ẩn!'); return; }
-  toast('Đã nạp ' + d.total_rules + ' từ khóa ẩn vào RAM (0ms gián đoạn proxy)!');
+  if (!r.ok) { toast(d.error || 'Lỗi đồng bộ rules!'); return; }
+  toast('Đã đồng bộ ' + d.sanitize_cnt + ' rule Ẩn + ' + d.block_cnt + ' rule Chặn vào RAM (0ms rớt mạng)!');
   loadOverview();
 }
 
@@ -597,30 +765,31 @@ function analyzeInputBox() {
 function uploadProxyFile(ev) {
   var f = ev.target.files[0]; if (!f) return;
   var rd = new FileReader();
-  rd.onload = function(e) { document.getElementById('proxiesBox').value = e.target.result || ''; analyzeInputBox(); toast('Đã nạp ' + f.name + '. Bấm "Lưu, Bọc & Tự Test Ngay"!'); };
+  rd.onload = function(e) { document.getElementById('proxiesBox').value = e.target.result || ''; analyzeInputBox(); toast('Đã nạp ' + f.name + '. Bấm "+ Thêm Vào Danh Sách"!'); };
   rd.readAsText(f);
 }
 
 async function loadConfig() {
   try {
     var c = await (await api('/api/config')).json();
-    document.getElementById('proxiesBox').value = c.proxies_raw || '';
     document.getElementById('defUpProto').value = c.default_up_proto || 'http';
     document.getElementById('sProxyUser').value = c.proxy_user || '';
     document.getElementById('sProxyPass').value = c.proxy_pass || '';
     document.getElementById('sStartPort').value = c.start_port || 10001;
     document.getElementById('sAutoCheck').value = (c.auto_check_min !== undefined ? c.auto_check_min : 5);
     document.getElementById('sQuotaTB').value = (c.bandwidth_quota_tb !== undefined ? c.bandwidth_quota_tb : 10);
-    document.getElementById('sKeywords').value = c.sanitize_keywords || '';
+    document.getElementById('sBlockPorts').checked = !!c.block_dangerous_ports;
+    document.getElementById('sSanKeywords').value = c.sanitize_keywords || '';
+    document.getElementById('sBlkKeywords').value = c.block_keywords || '';
     document.getElementById('sAdminUser').value = c.admin_user || 'admin';
     document.getElementById('sAdminPass').value = '';
-    analyzeInputBox();
   } catch (e) {}
 }
 
 async function refreshOutputBox() {
   try {
-    var txt = await (await api('/api/export?filter=' + encodeURIComponent(document.getElementById('expFilter').value))).text();
+    var qs = new URLSearchParams({filter: document.getElementById('expFilter').value, group: document.getElementById('expGroup').value});
+    var txt = await (await api('/api/export?' + qs.toString())).text();
     document.getElementById('outputBox').value = txt;
     var cnt = txt.trim() === '' ? 0 : txt.trim().split('\n').length;
     document.getElementById('outCountBadge').textContent = cnt + ' sẵn sàng';
@@ -632,27 +801,28 @@ async function copyOutputBox() {
   await copyTextSafe(txt); toast('Đã copy ' + txt.split('\n').length + ' proxy vào Clipboard!');
 }
 function downloadOutputBox() {
-  window.location = '/api/export?filter=' + encodeURIComponent(document.getElementById('expFilter').value) + '&dl=1';
+  var qs = new URLSearchParams({filter: document.getElementById('expFilter').value, group: document.getElementById('expGroup').value, dl: '1'});
+  window.location = '/api/export?' + qs.toString();
 }
 
-async function saveProxies() {
+async function saveProxies(mode) {
+  var raw = document.getElementById('proxiesBox').value;
+  if (!raw.trim()) { toast('Hãy dán danh sách proxy vào ô trước!'); return; }
+  if (mode === 'replace' && !confirm('Xóa TOÀN BỘ danh sách cũ và thay bằng danh sách này?')) return;
   var d = await (await api('/api/proxies/save', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({
-      proxies_raw: document.getElementById('proxiesBox').value,
+      proxies_raw: raw,
       default_up_proto: document.getElementById('defUpProto').value,
+      group: document.getElementById('addGroup').value,
+      note: document.getElementById('addNote').value,
+      mode: mode,
       dedup: document.getElementById('chkDedup').checked
     })
   })).json();
-  if (d.cleaned_raw !== undefined) { document.getElementById('proxiesBox').value = d.cleaned_raw; analyzeInputBox(); }
-  toast('Đã bọc ' + d.active_ports + ' cổng & đang tự động test LIVE!');
-  lastPortSig = ''; loadOverview(); loadPorts(); refreshOutputBox();
-}
-
-async function removeDead() {
-  var d = await (await api('/api/proxies/remove-dead', {method: 'POST'})).json();
-  document.getElementById('proxiesBox').value = d.cleaned_raw || ''; analyzeInputBox();
-  toast('Đã xóa ' + d.removed + ' proxy DIE! Còn ' + d.active_ports + ' cổng.');
+  if (mode === 'append') document.getElementById('proxiesBox').value = '';
+  analyzeInputBox();
+  toast('Đã thêm ' + d.added + ' proxy mới (Bỏ trùng: ' + (d.dupes||0) + ', Lỗi: ' + (d.invalid||0) + ') & đang tự test LIVE!');
   lastPortSig = ''; loadOverview(); loadPorts(); refreshOutputBox();
 }
 
@@ -665,7 +835,9 @@ async function saveSettings() {
       start_port: parseInt(document.getElementById('sStartPort').value, 10),
       auto_check_min: parseInt(document.getElementById('sAutoCheck').value, 10) || 0,
       bandwidth_quota_tb: parseFloat(document.getElementById('sQuotaTB').value) || 0,
-      sanitize_keywords: document.getElementById('sKeywords').value,
+      block_dangerous_ports: document.getElementById('sBlockPorts').checked,
+      sanitize_keywords: document.getElementById('sSanKeywords').value,
+      block_keywords: document.getElementById('sBlkKeywords').value,
       new_admin_user: document.getElementById('sAdminUser').value,
       new_admin_pass: document.getElementById('sAdminPass').value
     })
@@ -684,14 +856,15 @@ function restoreBackup(ev) {
     var d = await r.json();
     if (!r.ok) { toast(d.error || 'Lỗi khôi phục backup'); return; }
     toast('Đã khôi phục thành công ' + d.active_ports + ' cổng proxy!');
-    loadConfig(); loadOverview(); refreshOutputBox();
+    lastPortSig = ''; loadConfig(); loadOverview(); loadPorts(); refreshOutputBox();
   };
   rd.readAsText(f);
 }
 
 async function startScan(mode) {
-  await api('/api/scan/start', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({mode: mode})});
-  toast('Đang tự động kiểm tra toàn bộ proxy bằng IP của VPS...');
+  var grp = document.getElementById('pgroup').value;
+  await api('/api/scan/start', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({mode: mode, group: grp})});
+  toast('Đang kiểm tra proxy bằng IP của VPS...');
   loadOverview();
 }
 async function stopScan() { await api('/api/scan/stop', {method: 'POST'}); toast('Đã dừng kiểm tra.'); }

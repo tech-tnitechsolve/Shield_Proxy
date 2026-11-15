@@ -34,6 +34,7 @@ type PortRunner struct {
 	ActiveConns   int64
 	TotalReqs     int64
 	SanitizedReqs int64
+	BlockedReqs   int64
 	ErrorReqs     int64
 	BytesUp       int64
 	BytesDown     int64
@@ -43,6 +44,8 @@ type PortRunner struct {
 	Port     int
 	mu       sync.RWMutex
 	upstream Upstream
+	group    string
+	note     string
 	lastErr  string
 	health   string // "untested", "alive", "dead"
 	latency  int64
@@ -57,9 +60,11 @@ func (pr *PortRunner) GetUpstream() Upstream {
 	return pr.upstream
 }
 
-func (pr *PortRunner) SetUpstream(u Upstream) {
+func (pr *PortRunner) SetMeta(u Upstream, group, note string) {
 	pr.mu.Lock()
 	pr.upstream = u
+	pr.group = group
+	pr.note = note
 	pr.mu.Unlock()
 }
 
@@ -100,7 +105,7 @@ type RequestRecord struct {
 	BytesUp    int64  `json:"bytes_up"`
 	BytesDown  int64  `json:"bytes_down"`
 	DurationMs int64  `json:"duration_ms"`
-	Status     string `json:"status"` // "LIVE", "OK", "ERR"
+	Status     string `json:"status"` // "LIVE", "OK", "ERR", "BLK"
 	ErrorMsg   string `json:"error"`
 }
 
@@ -108,7 +113,6 @@ var bufReaderPool = sync.Pool{
 	New: func() interface{} { return bufio.NewReaderSize(nil, 8192) },
 }
 
-// Toi uu Linux TCP socket chong treo zombie/CLOSE_WAIT ma van giu kernel splice()
 func tuneTCP(c net.Conn) {
 	tc, ok := c.(*net.TCPConn)
 	if !ok {
@@ -228,7 +232,6 @@ func dialUpstreamCtx(ctx context.Context, up Upstream, targetHost string, target
 		return conn, nil
 	}
 
-	// SOCKS5 upstream handshake
 	var greet []byte
 	if up.User != "" || up.Pass != "" {
 		greet = []byte{0x05, 0x02, 0x00, 0x02}
@@ -397,7 +400,7 @@ func handleSOCKS5(clientConn net.Conn, br *bufio.Reader, pr *PortRunner, up Upst
 
 	if subtle.ConstantTimeCompare(uname, localUser) != 1 || subtle.ConstantTimeCompare(passwd, localPass) != 1 {
 		_, _ = clientConn.Write([]byte{0x01, 0x01})
-		pr.SetError("client auth failed")
+		pr.SetError("client wrong password")
 		return
 	}
 	if _, err := clientConn.Write([]byte{0x01, 0x00}); err != nil {
@@ -433,9 +436,9 @@ func handleSOCKS5(clientConn net.Conn, br *bufio.Reader, pr *PortRunner, up Upst
 		origHost = string(db)
 	default:
 		_, _ = clientConn.Write([]byte{0x05, 0x08, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
+		atomic.AddInt64(&pr.BlockedReqs, 1)
 		rec := newReqRecord(pr.Port, clientIP, "IPv6", "-", up.Addr(), "SOCKS5", false)
-		pr.SetError("ipv6 blocked")
-		finishReq(rec, "IPv6", "-", 0, 0, "ERR", "IPv6 blocked")
+		finishReq(rec, "IPv6", "-", 0, 0, "BLK", "IPv6 blocked")
 		return
 	}
 
@@ -444,10 +447,22 @@ func handleSOCKS5(clientConn net.Conn, br *bufio.Reader, pr *PortRunner, up Upst
 		return
 	}
 	targetPort := uint16(portB[0])<<8 | uint16(portB[1])
+	portStr := strconv.Itoa(int(targetPort))
 
-	if isPrivateOrReserved(origHost) || strings.HasPrefix(strings.ToLower(origHost), "ipv6.") {
+	origHost = strings.TrimSuffix(strings.TrimSpace(origHost), ".")
+	if isPrivateOrReserved(origHost) {
 		_, _ = clientConn.Write([]byte{0x05, 0x02, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
-		pr.SetError("private/ipv6 probe blocked")
+		atomic.AddInt64(&pr.BlockedReqs, 1)
+		rec := newReqRecord(pr.Port, clientIP, net.JoinHostPort(origHost, portStr), "-", up.Addr(), "SOCKS5", false)
+		finishReq(rec, origHost, "-", 0, 0, "BLK", "private IP blocked")
+		return
+	}
+
+	if blocked, reason := isBlockedRequest(origHost, targetPort); blocked {
+		_, _ = clientConn.Write([]byte{0x05, 0x02, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
+		atomic.AddInt64(&pr.BlockedReqs, 1)
+		rec := newReqRecord(pr.Port, clientIP, net.JoinHostPort(origHost, portStr), "-", up.Addr(), "SOCKS5", false)
+		finishReq(rec, origHost, "-", 0, 0, "BLK", reason)
 		return
 	}
 
@@ -459,12 +474,14 @@ func handleSOCKS5(clientConn net.Conn, br *bufio.Reader, pr *PortRunner, up Upst
 		ipStr, err := resolveDoH(origHost)
 		if err != nil || ipStr == "" {
 			_, _ = clientConn.Write([]byte{0x05, 0x01, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
-			pr.SetError("anti-leak blocked: " + origHost)
+			atomic.AddInt64(&pr.BlockedReqs, 1)
+			rec := newReqRecord(pr.Port, clientIP, net.JoinHostPort(origHost, portStr), "-", up.Addr(), "SOCKS5", false)
+			finishReq(rec, origHost, "-", 0, 0, "BLK", "anti-leak: doh failed")
 			return
 		}
 		if isPrivateOrReserved(ipStr) {
 			_, _ = clientConn.Write([]byte{0x05, 0x02, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
-			pr.SetError("resolved private IP blocked")
+			atomic.AddInt64(&pr.BlockedReqs, 1)
 			return
 		}
 		sentHost = ipStr
@@ -472,7 +489,6 @@ func handleSOCKS5(clientConn net.Conn, br *bufio.Reader, pr *PortRunner, up Upst
 		atomic.AddInt64(&pr.SanitizedReqs, 1)
 	}
 
-	portStr := strconv.Itoa(int(targetPort))
 	rec := newReqRecord(
 		pr.Port, clientIP,
 		net.JoinHostPort(origHost, portStr),
@@ -550,15 +566,33 @@ func handleHTTP(clientConn net.Conn, br *bufio.Reader, pr *PortRunner, up Upstre
 			portStr = "80"
 		}
 	}
+	origHost = strings.TrimSuffix(strings.TrimSpace(origHost), ".")
 	portNum, err := strconv.Atoi(portStr)
 	if err != nil || portNum < 1 || portNum > 65535 {
 		_, _ = clientConn.Write([]byte("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n"))
 		return
 	}
 
-	if isPrivateOrReserved(origHost) || strings.HasPrefix(strings.ToLower(origHost), "ipv6.") {
+	protoLabel := "HTTP-CONNECT"
+	isTunnel := true
+	if req.Method != http.MethodConnect {
+		protoLabel = "HTTP-" + req.Method
+		isTunnel = false
+	}
+
+	if isPrivateOrReserved(origHost) {
 		_, _ = clientConn.Write([]byte("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n"))
-		pr.SetError("private/ipv6 probe blocked")
+		atomic.AddInt64(&pr.BlockedReqs, 1)
+		rec := newReqRecord(pr.Port, clientIP, net.JoinHostPort(origHost, portStr), "-", up.Addr(), protoLabel, false)
+		finishReq(rec, origHost, "-", 0, 0, "BLK", "private/ipv6 blocked")
+		return
+	}
+
+	if blocked, reason := isBlockedRequest(origHost, uint16(portNum)); blocked {
+		_, _ = clientConn.Write([]byte("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n"))
+		atomic.AddInt64(&pr.BlockedReqs, 1)
+		rec := newReqRecord(pr.Port, clientIP, net.JoinHostPort(origHost, portStr), "-", up.Addr(), protoLabel, false)
+		finishReq(rec, origHost, "-", 0, 0, "BLK", reason)
 		return
 	}
 
@@ -569,23 +603,19 @@ func handleHTTP(clientConn net.Conn, br *bufio.Reader, pr *PortRunner, up Upstre
 		ipStr, err := resolveDoH(origHost)
 		if err != nil || ipStr == "" {
 			_, _ = clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n"))
-			pr.SetError("anti-leak blocked: " + origHost)
+			atomic.AddInt64(&pr.BlockedReqs, 1)
+			rec := newReqRecord(pr.Port, clientIP, net.JoinHostPort(origHost, portStr), "-", up.Addr(), protoLabel, false)
+			finishReq(rec, origHost, "-", 0, 0, "BLK", "anti-leak: doh failed")
 			return
 		}
 		if isPrivateOrReserved(ipStr) {
 			_, _ = clientConn.Write([]byte("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n"))
+			atomic.AddInt64(&pr.BlockedReqs, 1)
 			return
 		}
 		sentHost = ipStr
 		sanitized = true
 		atomic.AddInt64(&pr.SanitizedReqs, 1)
-	}
-
-	protoLabel := "HTTP-CONNECT"
-	isTunnel := true
-	if req.Method != http.MethodConnect {
-		protoLabel = "HTTP-" + req.Method
-		isTunnel = false
 	}
 
 	rec := newReqRecord(

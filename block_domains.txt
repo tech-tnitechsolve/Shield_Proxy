@@ -1,0 +1,59 @@
+# ==============================================================================
+# DANH SACH CHAN TUYET DOI (REJECT NGAY TAI ORACLE VPS - KHONG DAY SANG WEBSHARE)
+# Chong khach cuoi loi dung proxy de spam, tan cong mang, carding, lua dao
+# ==============================================================================
+
+# --- Ro ri IPv6 & DNS/WebRTC Leak ---
+ipv6.
+ipleak.net
+dnsleaktest.com
+browserleaks.com
+whoer.net
+
+# --- Darkweb / Tor / Malware C2 Tunnel ---
+.onion
+.i2p
+tor2web
+ngrok
+trycloudflare
+serveo.net
+localtunnel
+cobaltstrike
+metasploit
+
+# --- Chinh phu / Quan su / Ngan hang / Thanh toan (Chong bao cao lua dao & the) ---
+.gov
+.mil
+paypal.com
+stripe.com
+wise.com
+revolut.com
+payoneer.com
+chase.com
+bankofamerica
+wellsfargo
+citibank
+hsbc.com
+binance.com
+coinbase.com
+kraken.com
+bybit.com
+okx.com
+metamask
+blockchain.com
+
+# --- San ve / Hang hieu hay bao cao Abuse IP ---
+ticketmaster
+livenation
+stubhub
+axs.com
+nike.com
+supremenewyork
+footlocker
+
+# --- Torrent / P2P / Vi pham ban quyen nang ---
+thepiratebay
+1337x
+nyaa.si
+rarbg
+rutracker
