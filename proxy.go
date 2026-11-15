@@ -527,7 +527,9 @@ func handleHTTP(clientConn net.Conn, br *bufio.Reader, pr *PortRunner, up Upstre
 
 	if !checkHTTPAuth(req, localUser, localPass) {
 		_, _ = clientConn.Write([]byte("HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"Proxy\"\r\nConnection: close\r\n\r\n"))
-		pr.SetError("client http auth failed")
+		if req.Header.Get("Proxy-Authorization") != "" {
+			pr.SetError("client wrong password")
+		}
 		return
 	}
 
