@@ -190,7 +190,7 @@ func apiLogout(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// ==================== Async Background Scanner ====================
+// ==================== Async Background Scanner (Stealth & 1-CPU Safe) ====================
 var scanState struct {
 	mu      sync.Mutex
 	cancel  context.CancelFunc
@@ -206,7 +206,10 @@ func probeRunner(ctx context.Context, pr *PortRunner, mode string) (string, int6
 	t0 := time.Now()
 	up := pr.GetUpstream()
 	targetHost, targetPort := "1.1.1.1", uint16(443)
-	if mode == "deep" {
+	if mode == "quick" {
+		probes := []string{"1.1.1.1", "8.8.8.8", "9.9.9.9"}
+		targetHost = probes[(pr.Port+int(time.Now().Unix()))%len(probes)]
+	} else if mode == "deep" {
 		targetHost, targetPort = "api.ipify.org", uint16(80)
 	}
 
@@ -252,7 +255,7 @@ func probeRunner(ctx context.Context, pr *PortRunner, mode string) (string, int6
 	return "alive", lat, exitIP, ""
 }
 
-func triggerScan(mode string) int {
+func triggerScan(mode string, onlyPorts []int) int {
 	if mode != "deep" {
 		mode = "quick"
 	}
@@ -262,10 +265,20 @@ func triggerScan(mode string) int {
 		return 0
 	}
 
+	var wantSet map[int]bool
+	if len(onlyPorts) > 0 {
+		wantSet = make(map[int]bool, len(onlyPorts))
+		for _, p := range onlyPorts {
+			wantSet[p] = true
+		}
+	}
+
 	runnersMu.RLock()
 	list := make([]*PortRunner, 0, len(runners))
-	for _, pr := range runners {
-		list = append(list, pr)
+	for p, pr := range runners {
+		if wantSet == nil || wantSet[p] {
+			list = append(list, pr)
+		}
 	}
 	runnersMu.RUnlock()
 
@@ -286,7 +299,11 @@ func triggerScan(mode string) int {
 
 	go func() {
 		defer atomic.StoreInt32(&scanState.Running, 0)
-		sem := make(chan struct{}, 25)
+		workers := 25
+		if mode == "quick" {
+			workers = 5
+		}
+		sem := make(chan struct{}, workers)
 		var wg sync.WaitGroup
 		for _, pr := range list {
 			if ctx.Err() != nil {
@@ -308,6 +325,9 @@ func triggerScan(mode string) int {
 					atomic.AddInt64(&scanState.Dead, 1)
 				}
 				atomic.AddInt64(&scanState.Done, 1)
+				if mode == "quick" {
+					time.Sleep(250 * time.Millisecond)
+				}
 			}(pr)
 		}
 		wg.Wait()
@@ -320,10 +340,23 @@ func apiScanStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Mode string `json:"mode"`
+		Mode  string `json:"mode"`
+		Group string `json:"group"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body)
-	total := triggerScan(body.Mode)
+
+	var onlyPorts []int
+	if body.Group != "" && body.Group != "ALL" {
+		cfgMu.RLock()
+		for _, e := range appCfg.ProxyEntries {
+			if e.Enabled && e.Group == body.Group {
+				onlyPorts = append(onlyPorts, e.Port)
+			}
+		}
+		cfgMu.RUnlock()
+	}
+
+	total := triggerScan(body.Mode, onlyPorts)
 	writeJSON(w, http.StatusOK, map[string]interface{}{"status": "started", "total": total})
 }
 
@@ -355,7 +388,7 @@ func apiTestSinglePort(w http.ResponseWriter, r *http.Request) {
 	pr, ok := runners[body.Port]
 	runnersMu.RUnlock()
 	if !ok {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "cong khong ton tai"})
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "cong dang tat hoac khong ton tai"})
 		return
 	}
 
@@ -387,6 +420,7 @@ func apiResetPortData(w http.ResponseWriter, r *http.Request) {
 			atomic.StoreInt64(&pr.BytesDown, 0)
 			atomic.StoreInt64(&pr.TotalReqs, 0)
 			atomic.StoreInt64(&pr.SanitizedReqs, 0)
+			atomic.StoreInt64(&pr.BlockedReqs, 0)
 			atomic.StoreInt64(&pr.ErrorReqs, 0)
 			pr.mu.Lock()
 			pr.lastErr = ""
@@ -398,6 +432,7 @@ func apiResetPortData(w http.ResponseWriter, r *http.Request) {
 			atomic.StoreInt64(&pr.BytesDown, 0)
 			atomic.StoreInt64(&pr.TotalReqs, 0)
 			atomic.StoreInt64(&pr.SanitizedReqs, 0)
+			atomic.StoreInt64(&pr.BlockedReqs, 0)
 			atomic.StoreInt64(&pr.ErrorReqs, 0)
 			pr.mu.Lock()
 			pr.lastErr = ""
@@ -409,17 +444,45 @@ func apiResetPortData(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// ==================== Overview API (Zero STW Pause) ====================
+// ==================== Overview API ====================
 func apiOverview(w http.ResponseWriter, r *http.Request) {
-	var totalConns, totalReqs, totalSanitized, totalErrors, totalUp, totalDown int64
-	var alivePorts, deadPorts, totalPorts int
+	cfgMu.RLock()
+	pUser := appCfg.ProxyUser
+	pPass := appCfg.ProxyPass
+	sPort := appCfg.StartPort
+	quotaTB := appCfg.BandwidthQuotaTB
+	autoMin := appCfg.AutoCheckMin
+	totalConfigured := len(appCfg.ProxyEntries)
+	groupMap := make(map[string]int)
+	disabledCount := 0
+	for _, e := range appCfg.ProxyEntries {
+		g := e.Group
+		if g == "" {
+			g = "Mac dinh"
+		}
+		groupMap[g]++
+		if !e.Enabled {
+			disabledCount++
+		}
+	}
+	cfgMu.RUnlock()
+
+	var groups []string
+	for g := range groupMap {
+		groups = append(groups, g)
+	}
+	sort.Strings(groups)
+
+	var totalConns, totalReqs, totalSanitized, totalBlocked, totalErrors, totalUp, totalDown int64
+	var alivePorts, deadPorts, runningPorts int
 
 	runnersMu.RLock()
-	totalPorts = len(runners)
+	runningPorts = len(runners)
 	for _, pr := range runners {
 		totalConns += atomic.LoadInt64(&pr.ActiveConns)
 		totalReqs += atomic.LoadInt64(&pr.TotalReqs)
 		totalSanitized += atomic.LoadInt64(&pr.SanitizedReqs)
+		totalBlocked += atomic.LoadInt64(&pr.BlockedReqs)
 		totalErrors += atomic.LoadInt64(&pr.ErrorReqs)
 		totalUp += atomic.LoadInt64(&pr.BytesUp)
 		totalDown += atomic.LoadInt64(&pr.BytesDown)
@@ -444,43 +507,44 @@ func apiOverview(w http.ResponseWriter, r *http.Request) {
 	vps := vpsSnap
 	vpsMu.RUnlock()
 
-	cfgMu.RLock()
-	pUser, pPass, sPort, quotaTB, autoMin := appCfg.ProxyUser, appCfg.ProxyPass, appCfg.StartPort, appCfg.BandwidthQuotaTB, appCfg.AutoCheckMin
-	cfgMu.RUnlock()
-
 	quotaPct := 0.0
 	if quotaTB > 0 {
 		quotaBytes := quotaTB * 1099511627776.0
 		quotaPct = (float64(vps.MonthTxBytes) / quotaBytes) * 100.0
 	}
 
-	rulesCnt, rulesSync := getRulesStatus()
+	sanCnt, blkCnt, rulesSync := getRulesStatus()
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"public_ip":       pubIP,
-		"uptime_sec":      int64(time.Since(startTime).Seconds()),
-		"goroutines":      runtime.NumGoroutine(),
-		"app_mem_mb":      readAppMemMB(),
-		"dns_cache_cnt":   getDNSCacheCount(),
-		"rules_count":     rulesCnt,
-		"rules_last_sync": rulesSync,
-		"vps":             vps,
-		"quota_tb":        quotaTB,
-		"quota_pct":       quotaPct,
-		"auto_check_min":  autoMin,
-		"proxy_count":     totalPorts,
-		"alive_ports":     alivePorts,
-		"dead_ports":      deadPorts,
-		"active_conns":    totalConns,
-		"total_reqs":      totalReqs,
-		"total_sanitized": totalSanitized,
-		"total_errors":    totalErrors,
-		"total_bytes_up":  totalUp,
-		"total_bytes_dn":  totalDown,
-		"proxy_user":      pUser,
-		"proxy_pass":      pPass,
-		"start_port":      sPort,
-		"timeseries":      tsCopy,
+		"public_ip":          pubIP,
+		"uptime_sec":         int64(time.Since(startTime).Seconds()),
+		"goroutines":         runtime.NumGoroutine(),
+		"app_mem_mb":         readAppMemMB(),
+		"dns_cache_cnt":      getDNSCacheCount(),
+		"rules_sanitize_cnt": sanCnt,
+		"rules_block_cnt":    blkCnt,
+		"rules_last_sync":    rulesSync,
+		"vps":                vps,
+		"quota_tb":           quotaTB,
+		"quota_pct":          quotaPct,
+		"auto_check_min":     autoMin,
+		"proxy_total":        totalConfigured,
+		"proxy_count":        runningPorts,
+		"disabled_count":     disabledCount,
+		"alive_ports":        alivePorts,
+		"dead_ports":         deadPorts,
+		"groups":             groups,
+		"active_conns":       totalConns,
+		"total_reqs":         totalReqs,
+		"total_sanitized":    totalSanitized,
+		"total_blocked":      totalBlocked,
+		"total_errors":       totalErrors,
+		"total_bytes_up":     totalUp,
+		"total_bytes_dn":     totalDown,
+		"proxy_user":         pUser,
+		"proxy_pass":         pPass,
+		"start_port":         sPort,
+		"timeseries":         tsCopy,
 		"scan": map[string]interface{}{
 			"running": atomic.LoadInt32(&scanState.Running) == 1,
 			"total":   atomic.LoadInt64(&scanState.Total),
@@ -495,6 +559,7 @@ func apiOverview(w http.ResponseWriter, r *http.Request) {
 func apiPorts(w http.ResponseWriter, r *http.Request) {
 	q := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
 	filter := r.URL.Query().Get("filter")
+	groupFilter := r.URL.Query().Get("group")
 	sortBy := r.URL.Query().Get("sort")
 	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
@@ -505,13 +570,23 @@ func apiPorts(w http.ResponseWriter, r *http.Request) {
 		limit = 50
 	}
 
+	cfgMu.RLock()
+	entries := make([]ProxyEntry, len(appCfg.ProxyEntries))
+	copy(entries, appCfg.ProxyEntries)
+	cfgMu.RUnlock()
+
 	type portItem struct {
 		Port          int    `json:"port"`
+		Group         string `json:"group"`
+		Note          string `json:"note"`
+		Enabled       bool   `json:"enabled"`
 		Upstream      string `json:"upstream"`
+		UpstreamFull  string `json:"upstream_full"`
 		Proto         string `json:"proto"`
 		ActiveConns   int64  `json:"active_conns"`
 		TotalReqs     int64  `json:"total_reqs"`
 		SanitizedReqs int64  `json:"sanitized_reqs"`
+		BlockedReqs   int64  `json:"blocked_reqs"`
 		ErrorReqs     int64  `json:"error_reqs"`
 		BytesUp       int64  `json:"bytes_up"`
 		BytesDown     int64  `json:"bytes_down"`
@@ -521,59 +596,83 @@ func apiPorts(w http.ResponseWriter, r *http.Request) {
 		LastErr       string `json:"last_err"`
 	}
 
+	matched := make([]portItem, 0, len(entries))
 	runnersMu.RLock()
-	matched := make([]portItem, 0, len(runners))
-	for _, pr := range runners {
-		ac := atomic.LoadInt64(&pr.ActiveConns)
-		tr := atomic.LoadInt64(&pr.TotalReqs)
-		sr := atomic.LoadInt64(&pr.SanitizedReqs)
-		er := atomic.LoadInt64(&pr.ErrorReqs)
-		bu := atomic.LoadInt64(&pr.BytesUp)
-		bd := atomic.LoadInt64(&pr.BytesDown)
+	for _, ent := range entries {
+		grp := ent.Group
+		if grp == "" {
+			grp = "Mac dinh"
+		}
+		if groupFilter != "" && groupFilter != "ALL" && grp != groupFilter {
+			continue
+		}
 
-		pr.mu.RLock()
-		up := pr.upstream
-		hl := pr.health
-		lat := pr.latency
-		eip := pr.exitIP
-		le := pr.lastErr
-		pr.mu.RUnlock()
+		item := portItem{
+			Port:         ent.Port,
+			Group:        grp,
+			Note:         ent.Note,
+			Enabled:      ent.Enabled,
+			Upstream:     ent.Upstream.Addr(),
+			UpstreamFull: formatOneUpstream(ent.Upstream),
+			Proto:        ent.Upstream.Proto,
+			Health:       "disabled",
+		}
+
+		if ent.Enabled {
+			if pr, ok := runners[ent.Port]; ok {
+				item.ActiveConns = atomic.LoadInt64(&pr.ActiveConns)
+				item.TotalReqs = atomic.LoadInt64(&pr.TotalReqs)
+				item.SanitizedReqs = atomic.LoadInt64(&pr.SanitizedReqs)
+				item.BlockedReqs = atomic.LoadInt64(&pr.BlockedReqs)
+				item.ErrorReqs = atomic.LoadInt64(&pr.ErrorReqs)
+				item.BytesUp = atomic.LoadInt64(&pr.BytesUp)
+				item.BytesDown = atomic.LoadInt64(&pr.BytesDown)
+				pr.mu.RLock()
+				item.Health = pr.health
+				item.LatencyMs = pr.latency
+				item.ExitIP = pr.exitIP
+				item.LastErr = pr.lastErr
+				pr.mu.RUnlock()
+			} else {
+				item.Health = "untested"
+			}
+		}
 
 		switch filter {
 		case "alive":
-			if hl != "alive" {
+			if item.Health != "alive" {
 				continue
 			}
 		case "dead":
-			if hl != "dead" {
+			if item.Health != "dead" {
+				continue
+			}
+		case "disabled":
+			if item.Enabled {
 				continue
 			}
 		case "untested":
-			if hl != "untested" {
-				continue
-			}
-		case "active":
-			if ac == 0 {
+			if item.Health != "untested" {
 				continue
 			}
 		case "err":
-			if er == 0 {
+			if item.ErrorReqs == 0 {
+				continue
+			}
+		case "blocked":
+			if item.BlockedReqs == 0 {
 				continue
 			}
 		}
 
 		if q != "" {
-			hay := strings.ToLower(fmt.Sprintf("%d %s %s %s %s", pr.Port, up.Addr(), eip, le, up.Proto))
+			hay := strings.ToLower(fmt.Sprintf("%d %s %s %s %s %s %s", item.Port, item.Upstream, item.ExitIP, item.LastErr, item.Group, item.Note, item.Proto))
 			if !strings.Contains(hay, q) {
 				continue
 			}
 		}
 
-		matched = append(matched, portItem{
-			Port: pr.Port, Upstream: up.Addr(), Proto: up.Proto,
-			ActiveConns: ac, TotalReqs: tr, SanitizedReqs: sr, ErrorReqs: er,
-			BytesUp: bu, BytesDown: bd, Health: hl, LatencyMs: lat, ExitIP: eip, LastErr: le,
-		})
+		matched = append(matched, item)
 	}
 	runnersMu.RUnlock()
 
@@ -610,75 +709,14 @@ func apiPorts(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// ==================== Domain Intelligence & Rules Sync ====================
-func apiDomains(w http.ResponseWriter, r *http.Request) {
-	q := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
-	filter := r.URL.Query().Get("filter")
-
-	type domRow struct {
-		Domain     string `json:"domain"`
-		Hits       int64  `json:"hits"`
-		Sanitized  int64  `json:"sanitized"`
-		Errors     int64  `json:"errors"`
-		Bytes      int64  `json:"bytes"`
-		ResolvedIP string `json:"resolved_ip"`
-		IsTargeted bool   `json:"is_targeted"`
-		LastSeen   string `json:"last_seen"`
-	}
-
-	domMu.RLock()
-	rows := make([]domRow, 0, len(domStats))
-	for _, ds := range domStats {
-		hits := atomic.LoadInt64(&ds.Hits)
-		san := atomic.LoadInt64(&ds.Sanitized)
-		errs := atomic.LoadInt64(&ds.Errors)
-		b := atomic.LoadInt64(&ds.BytesUp) + atomic.LoadInt64(&ds.BytesDown)
-		ls := atomic.LoadInt64(&ds.LastSeen)
-
-		ds.mu.RLock()
-		rip := ds.ResolvedIP
-		dom := ds.Domain
-		ds.mu.RUnlock()
-
-		isT := needsSanitize(dom)
-		switch filter {
-		case "sanitized":
-			if san == 0 && !isT {
-				continue
-			}
-		case "direct":
-			if isT {
-				continue
-			}
-		case "err":
-			if errs == 0 {
-				continue
-			}
-		}
-		if q != "" && !strings.Contains(dom, q) && !strings.Contains(rip, q) {
-			continue
-		}
-
-		rows = append(rows, domRow{
-			Domain: dom, Hits: hits, Sanitized: san, Errors: errs, Bytes: b,
-			ResolvedIP: rip, IsTargeted: isT, LastSeen: time.Unix(ls, 0).Format("15:04:05"),
-		})
-	}
-	domMu.RUnlock()
-
-	sort.Slice(rows, func(i, j int) bool { return rows[i].Hits > rows[j].Hits })
-	if len(rows) > 150 {
-		rows = rows[:150]
-	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"rows": rows})
-}
-
-func apiAddSanitizeKeyword(w http.ResponseWriter, r *http.Request) {
+// ==================== Rules APIs ====================
+func apiAddRuleKeyword(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		return
 	}
 	var body struct {
 		Keyword string `json:"keyword"`
+		Mode    string `json:"mode"`
 	}
 	if json.NewDecoder(r.Body).Decode(&body) != nil {
 		return
@@ -690,20 +728,37 @@ func apiAddSanitizeKeyword(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cfgMu.Lock()
-	exists := false
-	for _, k := range appCfg.SanitizeKeywords {
-		if k == kw {
-			exists = true
-			break
+	if body.Mode == "block" {
+		exists := false
+		for _, k := range appCfg.BlockKeywords {
+			if k == kw {
+				exists = true
+				break
+			}
+		}
+		if !exists {
+			appCfg.BlockKeywords = append(appCfg.BlockKeywords, kw)
+			_ = saveConfigFile(appCfg)
+		}
+	} else {
+		exists := false
+		for _, k := range appCfg.SanitizeKeywords {
+			if k == kw {
+				exists = true
+				break
+			}
+		}
+		if !exists {
+			appCfg.SanitizeKeywords = append(appCfg.SanitizeKeywords, kw)
+			_ = saveConfigFile(appCfg)
 		}
 	}
-	if !exists {
-		appCfg.SanitizeKeywords = append(appCfg.SanitizeKeywords, kw)
-		_ = saveConfigFile(appCfg)
-		rebuildActiveKeywords(appCfg.SanitizeKeywords)
-	}
+	us := appCfg.SanitizeKeywords
+	ub := appCfg.BlockKeywords
+	bp := appCfg.BlockDangerousPorts
 	cfgMu.Unlock()
 
+	rebuildAllRules(us, ub, bp)
 	writeJSON(w, http.StatusOK, map[string]interface{}{"status": "ok", "keyword": kw})
 }
 
@@ -711,22 +766,21 @@ func apiSyncRules(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		return
 	}
-	remCnt, updated, err := syncRulesFromGitHub(true)
+	sanCnt, blkCnt, err := syncRulesFromGitHub(true)
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "Khong tai duoc sanitize_domains.txt: " + err.Error()})
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "Khong tai duoc rules GitHub: " + err.Error()})
 		return
 	}
-	total, last := getRulesStatus()
+	_, _, last := getRulesStatus()
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"status":       "ok",
-		"remote_count": remCnt,
-		"total_rules":  total,
-		"updated":      updated,
+		"sanitize_cnt": sanCnt,
+		"block_cnt":    blkCnt,
 		"last_sync":    last,
 	})
 }
 
-// ==================== Requests Inspector (Fast O(1) Copy Limit) ====================
+// ==================== Requests Inspector ====================
 func collectFilteredRequests(q, actionFilter, protoFilter, portFilter string, limit int) []RequestRecord {
 	q = strings.ToLower(strings.TrimSpace(q))
 	portWant := 0
@@ -758,11 +812,15 @@ func collectFilteredRequests(q, actionFilter, protoFilter, portFilter string, li
 				return false
 			}
 		case "DIRECT":
-			if r.Sanitized {
+			if r.Sanitized || r.Status == "BLK" {
 				return false
 			}
 		case "LIVE":
 			if r.Status != "LIVE" {
+				return false
+			}
+		case "BLK":
+			if r.Status != "BLK" {
 				return false
 			}
 		case "ERR":
@@ -855,66 +913,121 @@ func apiClearLogs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// ==================== Config, Paste Studio, Backup & Export ====================
+// ==================== Smart Proxy Manager APIs ====================
 func apiGetConfig(w http.ResponseWriter, r *http.Request) {
 	cfgMu.RLock()
 	c := appCfg
 	cfgMu.RUnlock()
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"public_ip":          pubIP,
-		"admin_user":         c.AdminUser,
-		"proxy_user":         c.ProxyUser,
-		"proxy_pass":         c.ProxyPass,
-		"start_port":         c.StartPort,
-		"default_up_proto":   c.DefaultUpProto,
-		"auto_check_min":     c.AutoCheckMin,
-		"bandwidth_quota_tb": c.BandwidthQuotaTB,
-		"sanitize_keywords":  strings.Join(c.SanitizeKeywords, ", "),
-		"proxies_raw":        c.ProxiesRaw,
+		"public_ip":             pubIP,
+		"admin_user":            c.AdminUser,
+		"proxy_user":            c.ProxyUser,
+		"proxy_pass":            c.ProxyPass,
+		"start_port":            c.StartPort,
+		"default_up_proto":      c.DefaultUpProto,
+		"auto_check_min":        c.AutoCheckMin,
+		"bandwidth_quota_tb":    c.BandwidthQuotaTB,
+		"block_dangerous_ports": c.BlockDangerousPorts,
+		"sanitize_keywords":     strings.Join(c.SanitizeKeywords, ", "),
+		"block_keywords":        strings.Join(c.BlockKeywords, ", "),
 	})
 }
 
-func apiSaveProxies(w http.ResponseWriter, r *http.Request) {
+func apiAddOrReplaceProxies(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		return
 	}
 	var body struct {
 		ProxiesRaw     string `json:"proxies_raw"`
 		DefaultUpProto string `json:"default_up_proto"`
+		Group          string `json:"group"`
+		Note           string `json:"note"`
+		Mode           string `json:"mode"`
 		Dedup          bool   `json:"dedup"`
 	}
 	if json.NewDecoder(r.Body).Decode(&body) != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 		return
 	}
-	if body.DefaultUpProto != "http" {
-		body.DefaultUpProto = "socks5"
+	if body.DefaultUpProto != "socks5" {
+		body.DefaultUpProto = "http"
 	}
+	grp := strings.TrimSpace(body.Group)
+	if grp == "" {
+		grp = "Mac dinh"
+	}
+	note := strings.TrimSpace(body.Note)
+	pStats := parseProxiesFlexible(body.ProxiesRaw, body.DefaultUpProto, body.Dedup)
 
-	rawToSave := body.ProxiesRaw
-	pStats := parseProxiesFlexible(rawToSave, body.DefaultUpProto, body.Dedup)
-	if body.Dedup {
-		rawToSave = formatProxiesRaw(pStats.Items)
-	}
+	var addedPorts []int
+	skippedDupes := pStats.Dupes
 
 	cfgMu.Lock()
 	newCfg := appCfg
-	newCfg.ProxiesRaw = rawToSave
 	newCfg.DefaultUpProto = body.DefaultUpProto
+
+	if body.Mode == "replace" {
+		newEntries := make([]ProxyEntry, 0, len(pStats.Items))
+		for i, u := range pStats.Items {
+			p := newCfg.StartPort + i
+			if p > 65535 {
+				break
+			}
+			newEntries = append(newEntries, ProxyEntry{
+				Port: p, Group: grp, Note: note, Enabled: true, Upstream: u,
+			})
+			addedPorts = append(addedPorts, p)
+		}
+		newCfg.ProxyEntries = newEntries
+	} else {
+		usedPorts := make(map[int]bool, len(newCfg.ProxyEntries))
+		existingKeys := make(map[string]bool, len(newCfg.ProxyEntries))
+		maxPort := newCfg.StartPort - 1
+		for _, e := range newCfg.ProxyEntries {
+			usedPorts[e.Port] = true
+			existingKeys[upstreamKey(e.Upstream)] = true
+			if e.Port > maxPort {
+				maxPort = e.Port
+			}
+		}
+		nextPort := maxPort + 1
+		for _, u := range pStats.Items {
+			if body.Dedup && existingKeys[upstreamKey(u)] {
+				skippedDupes++
+				continue
+			}
+			for usedPorts[nextPort] && nextPort <= 65535 {
+				nextPort++
+			}
+			if nextPort > 65535 {
+				break
+			}
+			usedPorts[nextPort] = true
+			existingKeys[upstreamKey(u)] = true
+			newCfg.ProxyEntries = append(newCfg.ProxyEntries, ProxyEntry{
+				Port: nextPort, Group: grp, Note: note, Enabled: true, Upstream: u,
+			})
+			addedPorts = append(addedPorts, nextPort)
+			nextPort++
+		}
+	}
+
+	syncRawFromEntries(&newCfg)
 	appCfg = newCfg
 	_ = saveConfigFile(newCfg)
 	cfgMu.Unlock()
 
-	cnt, _, err := applyConfigAndReload(newCfg)
-	go triggerScan("deep")
+	cnt, err := applyConfigAndReload(newCfg)
+	if len(addedPorts) > 0 {
+		go triggerScan("deep", addedPorts)
+	}
 
 	resp := map[string]interface{}{
 		"status":       "ok",
 		"active_ports": cnt,
-		"parsed":       len(pStats.Items),
-		"dupes":        pStats.Dupes,
+		"added":        len(addedPorts),
+		"dupes":        skippedDupes,
 		"invalid":      pStats.Invalid,
-		"cleaned_raw":  rawToSave,
 	}
 	if err != nil {
 		resp["warning"] = err.Error()
@@ -922,47 +1035,170 @@ func apiSaveProxies(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-func apiRemoveDeadProxies(w http.ResponseWriter, r *http.Request) {
+func apiProxyEntryAction(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		return
 	}
-	runnersMu.RLock()
-	ports := make([]int, 0, len(runners))
-	for p := range runners {
-		ports = append(ports, p)
+	var body struct {
+		Port         int    `json:"port"`
+		Action       string `json:"action"`
+		UpstreamLine string `json:"upstream_line"`
+		Group        string `json:"group"`
+		Note         string `json:"note"`
 	}
-	sort.Ints(ports)
-
-	var keep []Upstream
-	removed := 0
-	for _, p := range ports {
-		pr := runners[p]
-		pr.mu.RLock()
-		hl := pr.health
-		up := pr.upstream
-		pr.mu.RUnlock()
-		if hl == "dead" {
-			removed++
-		} else {
-			keep = append(keep, up)
-		}
+	if json.NewDecoder(r.Body).Decode(&body) != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
 	}
-	runnersMu.RUnlock()
 
-	cleaned := formatProxiesRaw(keep)
+	var testPort []int
+	found := false
+
 	cfgMu.Lock()
 	newCfg := appCfg
-	newCfg.ProxiesRaw = cleaned
+	outEntries := make([]ProxyEntry, 0, len(newCfg.ProxyEntries))
+	for _, e := range newCfg.ProxyEntries {
+		if e.Port != body.Port {
+			outEntries = append(outEntries, e)
+			continue
+		}
+		found = true
+		switch body.Action {
+		case "delete":
+		case "toggle":
+			e.Enabled = !e.Enabled
+			if e.Enabled {
+				testPort = []int{e.Port}
+			}
+			outEntries = append(outEntries, e)
+		case "edit":
+			if strings.TrimSpace(body.UpstreamLine) != "" {
+				u, ok := parseSingleUpstream(body.UpstreamLine, e.Upstream.Proto)
+				if !ok {
+					cfgMu.Unlock()
+					writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Dinh dang Proxy nguon khong hop le!"})
+					return
+				}
+				e.Upstream = u
+				if e.Enabled {
+					testPort = []int{e.Port}
+				}
+			}
+			if strings.TrimSpace(body.Group) != "" {
+				e.Group = strings.TrimSpace(body.Group)
+			}
+			e.Note = strings.TrimSpace(body.Note)
+			outEntries = append(outEntries, e)
+		default:
+			outEntries = append(outEntries, e)
+		}
+	}
+	if !found {
+		cfgMu.Unlock()
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Khong tim thay cong nay"})
+		return
+	}
+	newCfg.ProxyEntries = outEntries
+	syncRawFromEntries(&newCfg)
 	appCfg = newCfg
 	_ = saveConfigFile(newCfg)
 	cfgMu.Unlock()
 
-	cnt, _, _ := applyConfigAndReload(newCfg)
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"removed":      removed,
-		"active_ports": cnt,
-		"cleaned_raw":  cleaned,
-	})
+	cnt, _ := applyConfigAndReload(newCfg)
+	if len(testPort) > 0 {
+		go triggerScan("deep", testPort)
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"status": "ok", "active_ports": cnt})
+}
+
+func apiProxyBulkAction(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		return
+	}
+	var body struct {
+		Action string `json:"action"`
+		Ports  []int  `json:"ports"`
+		Group  string `json:"group"`
+	}
+	if json.NewDecoder(r.Body).Decode(&body) != nil {
+		return
+	}
+
+	sel := make(map[int]bool, len(body.Ports))
+	for _, p := range body.Ports {
+		sel[p] = true
+	}
+
+	deadMap := make(map[int]bool)
+	if body.Action == "delete_dead" {
+		runnersMu.RLock()
+		for p, pr := range runners {
+			pr.mu.RLock()
+			if pr.health == "dead" {
+				deadMap[p] = true
+			}
+			pr.mu.RUnlock()
+		}
+		runnersMu.RUnlock()
+	}
+
+	affected := 0
+	cfgMu.Lock()
+	newCfg := appCfg
+	out := make([]ProxyEntry, 0, len(newCfg.ProxyEntries))
+
+	for i, e := range newCfg.ProxyEntries {
+		inTarget := len(sel) == 0 || sel[e.Port]
+		switch body.Action {
+		case "delete_dead":
+			if deadMap[e.Port] {
+				affected++
+				continue
+			}
+			out = append(out, e)
+		case "delete_selected":
+			if sel[e.Port] {
+				affected++
+				continue
+			}
+			out = append(out, e)
+		case "enable":
+			if inTarget && !e.Enabled {
+				e.Enabled = true
+				affected++
+			}
+			out = append(out, e)
+		case "disable":
+			if inTarget && e.Enabled {
+				e.Enabled = false
+				affected++
+			}
+			out = append(out, e)
+		case "set_group":
+			if inTarget && strings.TrimSpace(body.Group) != "" {
+				e.Group = strings.TrimSpace(body.Group)
+				affected++
+			}
+			out = append(out, e)
+		case "reindex":
+			e.Port = newCfg.StartPort + i
+			if e.Port <= 65535 {
+				out = append(out, e)
+				affected++
+			}
+		default:
+			out = append(out, e)
+		}
+	}
+
+	newCfg.ProxyEntries = out
+	syncRawFromEntries(&newCfg)
+	appCfg = newCfg
+	_ = saveConfigFile(newCfg)
+	cfgMu.Unlock()
+
+	cnt, _ := applyConfigAndReload(newCfg)
+	writeJSON(w, http.StatusOK, map[string]interface{}{"status": "ok", "affected": affected, "active_ports": cnt})
 }
 
 func apiSaveSettings(w http.ResponseWriter, r *http.Request) {
@@ -970,14 +1206,16 @@ func apiSaveSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		ProxyUser        string  `json:"proxy_user"`
-		ProxyPass        string  `json:"proxy_pass"`
-		StartPort        int     `json:"start_port"`
-		AutoCheckMin     int     `json:"auto_check_min"`
-		BandwidthQuotaTB float64 `json:"bandwidth_quota_tb"`
-		SanitizeKeywords string  `json:"sanitize_keywords"`
-		NewAdminUser     string  `json:"new_admin_user"`
-		NewAdminPass     string  `json:"new_admin_pass"`
+		ProxyUser           string  `json:"proxy_user"`
+		ProxyPass           string  `json:"proxy_pass"`
+		StartPort           int     `json:"start_port"`
+		AutoCheckMin        int     `json:"auto_check_min"`
+		BandwidthQuotaTB    float64 `json:"bandwidth_quota_tb"`
+		BlockDangerousPorts bool    `json:"block_dangerous_ports"`
+		SanitizeKeywords    string  `json:"sanitize_keywords"`
+		BlockKeywords       string  `json:"block_keywords"`
+		NewAdminUser        string  `json:"new_admin_user"`
+		NewAdminPass        string  `json:"new_admin_pass"`
 	}
 	if json.NewDecoder(r.Body).Decode(&body) != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
@@ -998,12 +1236,15 @@ func apiSaveSettings(w http.ResponseWriter, r *http.Request) {
 		body.BandwidthQuotaTB = 0
 	}
 
-	var kws []string
-	for _, k := range strings.Split(body.SanitizeKeywords, ",") {
-		k = strings.TrimSpace(strings.ToLower(k))
-		if k != "" {
-			kws = append(kws, k)
+	splitCSV := func(s string) []string {
+		var out []string
+		for _, k := range strings.Split(s, ",") {
+			k = strings.TrimSpace(strings.ToLower(k))
+			if k != "" {
+				out = append(out, k)
+			}
 		}
+		return out
 	}
 
 	cfgMu.Lock()
@@ -1013,7 +1254,9 @@ func apiSaveSettings(w http.ResponseWriter, r *http.Request) {
 	newCfg.StartPort = body.StartPort
 	newCfg.AutoCheckMin = body.AutoCheckMin
 	newCfg.BandwidthQuotaTB = body.BandwidthQuotaTB
-	newCfg.SanitizeKeywords = kws
+	newCfg.BlockDangerousPorts = body.BlockDangerousPorts
+	newCfg.SanitizeKeywords = splitCSV(body.SanitizeKeywords)
+	newCfg.BlockKeywords = splitCSV(body.BlockKeywords)
 	if strings.TrimSpace(body.NewAdminUser) != "" {
 		newCfg.AdminUser = strings.TrimSpace(body.NewAdminUser)
 	}
@@ -1026,7 +1269,7 @@ func apiSaveSettings(w http.ResponseWriter, r *http.Request) {
 	_ = saveConfigFile(newCfg)
 	cfgMu.Unlock()
 
-	cnt, _, err := applyConfigAndReload(newCfg)
+	cnt, err := applyConfigAndReload(newCfg)
 	resp := map[string]interface{}{"status": "ok", "active_ports": cnt}
 	if err != nil {
 		resp["warning"] = err.Error()
@@ -1036,31 +1279,44 @@ func apiSaveSettings(w http.ResponseWriter, r *http.Request) {
 
 func apiExportWrapped(w http.ResponseWriter, r *http.Request) {
 	filter := r.URL.Query().Get("filter")
+	groupFilter := r.URL.Query().Get("group")
 
 	cfgMu.RLock()
 	c := appCfg
+	entries := make([]ProxyEntry, len(appCfg.ProxyEntries))
+	copy(entries, appCfg.ProxyEntries)
 	cfgMu.RUnlock()
 
 	type exportRow struct {
-		port   int
-		proto  string
-		health string
+		port  int
+		proto string
 	}
+	var rows []exportRow
 	runnersMu.RLock()
-	rows := make([]exportRow, 0, len(runners))
-	for _, pr := range runners {
-		pr.mu.RLock()
-		hl := pr.health
-		proto := pr.upstream.Proto
-		pr.mu.RUnlock()
-
+	for _, ent := range entries {
+		if !ent.Enabled {
+			continue
+		}
+		grp := ent.Group
+		if grp == "" {
+			grp = "Mac dinh"
+		}
+		if groupFilter != "" && groupFilter != "ALL" && grp != groupFilter {
+			continue
+		}
+		hl := "untested"
+		if pr, ok := runners[ent.Port]; ok {
+			pr.mu.RLock()
+			hl = pr.health
+			pr.mu.RUnlock()
+		}
 		if filter == "alive" && hl != "alive" {
 			continue
 		}
 		if filter == "hide_dead" && hl == "dead" {
 			continue
 		}
-		rows = append(rows, exportRow{port: pr.Port, proto: proto, health: hl})
+		rows = append(rows, exportRow{port: ent.Port, proto: ent.Upstream.Proto})
 	}
 	runnersMu.RUnlock()
 
@@ -1092,13 +1348,21 @@ func apiRestoreConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var c Config
-	if json.NewDecoder(io.LimitReader(r.Body, 4<<20)).Decode(&c) != nil {
+	if json.NewDecoder(io.LimitReader(r.Body, 8<<20)).Decode(&c) != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "File backup JSON khong hop le!"})
 		return
 	}
 	if c.ProxyUser == "" || c.ProxyPass == "" || c.StartPort < 1024 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Thieu thong tin proxy/port trong file backup!"})
 		return
+	}
+	if len(c.ProxyEntries) == 0 && strings.TrimSpace(c.ProxiesRaw) != "" {
+		ps := parseProxiesFlexible(c.ProxiesRaw, c.DefaultUpProto, false)
+		for i, u := range ps.Items {
+			c.ProxyEntries = append(c.ProxyEntries, ProxyEntry{
+				Port: c.StartPort + i, Group: "Mac dinh", Enabled: true, Upstream: u,
+			})
+		}
 	}
 
 	cfgMu.Lock()
@@ -1107,12 +1371,13 @@ func apiRestoreConfig(w http.ResponseWriter, r *http.Request) {
 		c.AdminSalt = appCfg.AdminSalt
 		c.AdminPassHash = appCfg.AdminPassHash
 	}
+	syncRawFromEntries(&c)
 	appCfg = c
 	_ = saveConfigFile(c)
 	cfgMu.Unlock()
 
-	cnt, _, _ := applyConfigAndReload(c)
-	go triggerScan("deep")
+	cnt, _ := applyConfigAndReload(c)
+	go triggerScan("deep", nil)
 	writeJSON(w, http.StatusOK, map[string]interface{}{"status": "ok", "active_ports": cnt})
 }
 
@@ -1131,15 +1396,15 @@ func startWebDashboard(port int) {
 	mux.HandleFunc("/api/ports", requireAuth(apiPorts))
 	mux.HandleFunc("/api/ports/test", requireAuth(apiTestSinglePort))
 	mux.HandleFunc("/api/ports/reset", requireAuth(apiResetPortData))
-	mux.HandleFunc("/api/domains", requireAuth(apiDomains))
-	mux.HandleFunc("/api/domains/sanitize", requireAuth(apiAddSanitizeKeyword))
+	mux.HandleFunc("/api/rules/add", requireAuth(apiAddRuleKeyword))
 	mux.HandleFunc("/api/rules/sync", requireAuth(apiSyncRules))
 	mux.HandleFunc("/api/requests", requireAuth(apiRequests))
 	mux.HandleFunc("/api/requests/csv", requireAuth(apiExportCSV))
 	mux.HandleFunc("/api/requests/clear", requireAuth(apiClearLogs))
 	mux.HandleFunc("/api/config", requireAuth(apiGetConfig))
-	mux.HandleFunc("/api/proxies/save", requireAuth(apiSaveProxies))
-	mux.HandleFunc("/api/proxies/remove-dead", requireAuth(apiRemoveDeadProxies))
+	mux.HandleFunc("/api/proxies/save", requireAuth(apiAddOrReplaceProxies))
+	mux.HandleFunc("/api/proxies/entry", requireAuth(apiProxyEntryAction))
+	mux.HandleFunc("/api/proxies/bulk", requireAuth(apiProxyBulkAction))
 	mux.HandleFunc("/api/scan/start", requireAuth(apiScanStart))
 	mux.HandleFunc("/api/scan/stop", requireAuth(apiScanStop))
 	mux.HandleFunc("/api/settings/save", requireAuth(apiSaveSettings))
