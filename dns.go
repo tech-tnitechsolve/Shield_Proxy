@@ -239,3 +239,10 @@ func fetchDoHIPv4List(domain string) ([]string, error) {
 	}
 	return out, nil
 }
+
+func getDNSCacheCount() int {
+	dnsMu.RLock()
+	n := len(dnsCache)
+	dnsMu.RUnlock()
+	return n
+}

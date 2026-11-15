@@ -381,6 +381,7 @@ ExecStart=${BIN_PATH} ${EXEC_ARGS}
 Restart=always
 RestartSec=2
 LimitNOFILE=1048576
+TasksMax=infinity
 
 [Install]
 WantedBy=multi-user.target

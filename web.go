@@ -11,7 +11,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"os"
 	"runtime"
 	"sort"
 	"strconv"
@@ -253,23 +252,14 @@ func probeRunner(ctx context.Context, pr *PortRunner, mode string) (string, int6
 	return "alive", lat, exitIP, ""
 }
 
-func apiScanStart(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		return
+func triggerScan(mode string) int {
+	if mode != "deep" {
+		mode = "quick"
 	}
-	var body struct {
-		Mode string `json:"mode"`
-	}
-	_ = json.NewDecoder(r.Body).Decode(&body)
-	if body.Mode != "deep" {
-		body.Mode = "quick"
-	}
-
 	scanState.mu.Lock()
 	if atomic.LoadInt32(&scanState.Running) == 1 {
 		scanState.mu.Unlock()
-		writeJSON(w, http.StatusOK, map[string]string{"status": "already_running"})
-		return
+		return 0
 	}
 
 	runnersMu.RLock()
@@ -279,9 +269,14 @@ func apiScanStart(w http.ResponseWriter, r *http.Request) {
 	}
 	runnersMu.RUnlock()
 
+	if len(list) == 0 {
+		scanState.mu.Unlock()
+		return 0
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	scanState.cancel = cancel
-	scanState.Mode = body.Mode
+	scanState.Mode = mode
 	atomic.StoreInt32(&scanState.Running, 1)
 	atomic.StoreInt64(&scanState.Total, int64(len(list)))
 	atomic.StoreInt64(&scanState.Done, 0)
@@ -306,7 +301,7 @@ func apiScanStart(w http.ResponseWriter, r *http.Request) {
 				case <-ctx.Done():
 					return
 				}
-				st, _, _, _ := probeRunner(ctx, runner, body.Mode)
+				st, _, _, _ := probeRunner(ctx, runner, mode)
 				if st == "alive" {
 					atomic.AddInt64(&scanState.Alive, 1)
 				} else {
@@ -317,8 +312,19 @@ func apiScanStart(w http.ResponseWriter, r *http.Request) {
 		}
 		wg.Wait()
 	}()
+	return len(list)
+}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"status": "started", "total": len(list)})
+func apiScanStart(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		return
+	}
+	var body struct {
+		Mode string `json:"mode"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	total := triggerScan(body.Mode)
+	writeJSON(w, http.StatusOK, map[string]interface{}{"status": "started", "total": total})
 }
 
 func apiScanStop(w http.ResponseWriter, r *http.Request) {
@@ -365,28 +371,6 @@ func apiTestSinglePort(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func readProcInt(path string) int64 {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return 0
-	}
-	v, _ := strconv.ParseInt(strings.TrimSpace(string(b)), 10, 64)
-	return v
-}
-
-func readLoadAvg() string {
-	b, err := os.ReadFile("/proc/loadavg")
-	if err != nil {
-		return "-"
-	}
-	f := strings.Fields(string(b))
-	if len(f) >= 3 {
-		return f[0] + " " + f[1] + " " + f[2]
-	}
-	return "-"
-}
-
-// ==================== Lightweight Overview API (~1.5KB) ====================
 func apiOverview(w http.ResponseWriter, r *http.Request) {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
@@ -420,18 +404,30 @@ func apiOverview(w http.ResponseWriter, r *http.Request) {
 	copy(tsCopy, tsHistory)
 	tsMu.RUnlock()
 
+	vpsMu.RLock()
+	vps := vpsSnap
+	vpsMu.RUnlock()
+
 	cfgMu.RLock()
-	pUser, pPass, sPort := appCfg.ProxyUser, appCfg.ProxyPass, appCfg.StartPort
+	pUser, pPass, sPort, quotaTB, autoMin := appCfg.ProxyUser, appCfg.ProxyPass, appCfg.StartPort, appCfg.BandwidthQuotaTB, appCfg.AutoCheckMin
 	cfgMu.RUnlock()
+
+	quotaPct := 0.0
+	if quotaTB > 0 {
+		quotaBytes := quotaTB * 1099511627776.0
+		quotaPct = (float64(vps.MonthTxBytes) / quotaBytes) * 100.0
+	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"public_ip":       pubIP,
 		"uptime_sec":      int64(time.Since(startTime).Seconds()),
-		"load_avg":        readLoadAvg(),
-		"conntrack_cur":   readProcInt("/proc/sys/net/netfilter/nf_conntrack_count"),
-		"conntrack_max":   readProcInt("/proc/sys/net/netfilter/nf_conntrack_max"),
 		"goroutines":      runtime.NumGoroutine(),
-		"mem_alloc_mb":    float64(m.Alloc) / 1048576.0,
+		"app_mem_mb":      float64(m.Alloc) / 1048576.0,
+		"dns_cache_cnt":   getDNSCacheCount(),
+		"vps":             vps,
+		"quota_tb":        quotaTB,
+		"quota_pct":       quotaPct,
+		"auto_check_min":  autoMin,
 		"proxy_count":     totalPorts,
 		"alive_ports":     alivePorts,
 		"dead_ports":      deadPorts,
@@ -809,14 +805,16 @@ func apiGetConfig(w http.ResponseWriter, r *http.Request) {
 	c := appCfg
 	cfgMu.RUnlock()
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"public_ip":         pubIP,
-		"admin_user":        c.AdminUser,
-		"proxy_user":        c.ProxyUser,
-		"proxy_pass":        c.ProxyPass,
-		"start_port":        c.StartPort,
-		"default_up_proto":  c.DefaultUpProto,
-		"sanitize_keywords": strings.Join(c.SanitizeKeywords, ", "),
-		"proxies_raw":       c.ProxiesRaw,
+		"public_ip":          pubIP,
+		"admin_user":         c.AdminUser,
+		"proxy_user":         c.ProxyUser,
+		"proxy_pass":         c.ProxyPass,
+		"start_port":         c.StartPort,
+		"default_up_proto":   c.DefaultUpProto,
+		"auto_check_min":     c.AutoCheckMin,
+		"bandwidth_quota_tb": c.BandwidthQuotaTB,
+		"sanitize_keywords":  strings.Join(c.SanitizeKeywords, ", "),
+		"proxies_raw":        c.ProxiesRaw,
 	})
 }
 
@@ -852,6 +850,9 @@ func apiSaveProxies(w http.ResponseWriter, r *http.Request) {
 	cfgMu.Unlock()
 
 	cnt, _, err := applyConfigAndReload(newCfg)
+	// Tu dong kiem tra song/chet ngay bang IP VPS sau khi luu
+	go triggerScan("deep")
+
 	resp := map[string]interface{}{
 		"status":       "ok",
 		"active_ports": cnt,
@@ -914,12 +915,14 @@ func apiSaveSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		ProxyUser        string `json:"proxy_user"`
-		ProxyPass        string `json:"proxy_pass"`
-		StartPort        int    `json:"start_port"`
-		SanitizeKeywords string `json:"sanitize_keywords"`
-		NewAdminUser     string `json:"new_admin_user"`
-		NewAdminPass     string `json:"new_admin_pass"`
+		ProxyUser        string  `json:"proxy_user"`
+		ProxyPass        string  `json:"proxy_pass"`
+		StartPort        int     `json:"start_port"`
+		AutoCheckMin     int     `json:"auto_check_min"`
+		BandwidthQuotaTB float64 `json:"bandwidth_quota_tb"`
+		SanitizeKeywords string  `json:"sanitize_keywords"`
+		NewAdminUser     string  `json:"new_admin_user"`
+		NewAdminPass     string  `json:"new_admin_pass"`
 	}
 	if json.NewDecoder(r.Body).Decode(&body) != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
@@ -932,6 +935,12 @@ func apiSaveSettings(w http.ResponseWriter, r *http.Request) {
 	if body.StartPort < 1024 || body.StartPort > 60000 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Start Port phai tu 1024 den 60000!"})
 		return
+	}
+	if body.AutoCheckMin < 0 {
+		body.AutoCheckMin = 0
+	}
+	if body.BandwidthQuotaTB < 0 {
+		body.BandwidthQuotaTB = 0
 	}
 
 	var kws []string
@@ -947,6 +956,8 @@ func apiSaveSettings(w http.ResponseWriter, r *http.Request) {
 	newCfg.ProxyUser = strings.TrimSpace(body.ProxyUser)
 	newCfg.ProxyPass = strings.TrimSpace(body.ProxyPass)
 	newCfg.StartPort = body.StartPort
+	newCfg.AutoCheckMin = body.AutoCheckMin
+	newCfg.BandwidthQuotaTB = body.BandwidthQuotaTB
 	newCfg.SanitizeKeywords = kws
 	if strings.TrimSpace(body.NewAdminUser) != "" {
 		newCfg.AdminUser = strings.TrimSpace(body.NewAdminUser)
@@ -969,16 +980,7 @@ func apiSaveSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 func apiExportWrapped(w http.ResponseWriter, r *http.Request) {
-	tmpl := r.URL.Query().Get("tmpl")
-	filter := r.URL.Query().Get("filter")
-	if tmpl == "" {
-		mode := r.URL.Query().Get("type")
-		if mode == "http" {
-			tmpl = "http://{user}:{pass}@{ip}:{port}"
-		} else {
-			tmpl = "socks5://{user}:{pass}@{ip}:{port}"
-		}
-	}
+	filter := r.URL.Query().Get("filter") // all, alive, hide_dead
 
 	cfgMu.RLock()
 	c := appCfg
@@ -986,8 +988,7 @@ func apiExportWrapped(w http.ResponseWriter, r *http.Request) {
 
 	type exportRow struct {
 		port   int
-		upAddr string
-		exitIP string
+		proto  string
 		health string
 	}
 	runnersMu.RLock()
@@ -995,8 +996,7 @@ func apiExportWrapped(w http.ResponseWriter, r *http.Request) {
 	for _, pr := range runners {
 		pr.mu.RLock()
 		hl := pr.health
-		ua := pr.upstream.Addr()
-		eip := pr.exitIP
+		proto := pr.upstream.Proto
 		pr.mu.RUnlock()
 
 		if filter == "alive" && hl != "alive" {
@@ -1005,7 +1005,7 @@ func apiExportWrapped(w http.ResponseWriter, r *http.Request) {
 		if filter == "hide_dead" && hl == "dead" {
 			continue
 		}
-		rows = append(rows, exportRow{port: pr.Port, upAddr: ua, exitIP: eip, health: hl})
+		rows = append(rows, exportRow{port: pr.Port, proto: proto, health: hl})
 	}
 	runnersMu.RUnlock()
 
@@ -1013,14 +1013,8 @@ func apiExportWrapped(w http.ResponseWriter, r *http.Request) {
 
 	var lines []string
 	for _, row := range rows {
-		s := tmpl
-		s = strings.ReplaceAll(s, "{user}", c.ProxyUser)
-		s = strings.ReplaceAll(s, "{pass}", c.ProxyPass)
-		s = strings.ReplaceAll(s, "{ip}", pubIP)
-		s = strings.ReplaceAll(s, "{port}", strconv.Itoa(row.port))
-		s = strings.ReplaceAll(s, "{upstream}", row.upAddr)
-		s = strings.ReplaceAll(s, "{exit_ip}", row.exitIP)
-		lines = append(lines, s)
+		// Dau vao nao -> dau ra dung giao thuc do (1:1)
+		lines = append(lines, fmt.Sprintf("%s://%s:%s@%s:%d", row.proto, c.ProxyUser, c.ProxyPass, pubIP, row.port))
 	}
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -1028,6 +1022,44 @@ func apiExportWrapped(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Disposition", `attachment; filename="wrapped_proxies.txt"`)
 	}
 	_, _ = w.Write([]byte(strings.Join(lines, "\n")))
+}
+
+func apiBackupConfig(w http.ResponseWriter, r *http.Request) {
+	cfgMu.RLock()
+	c := appCfg
+	cfgMu.RUnlock()
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="proxyshield-backup.json"`)
+	_ = json.NewEncoder(w).Encode(c)
+}
+
+func apiRestoreConfig(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		return
+	}
+	var c Config
+	if json.NewDecoder(io.LimitReader(r.Body, 4<<20)).Decode(&c) != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "File backup JSON khong hop le!"})
+		return
+	}
+	if c.ProxyUser == "" || c.ProxyPass == "" || c.StartPort < 1024 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Thieu thong tin proxy/port trong file backup!"})
+		return
+	}
+
+	cfgMu.Lock()
+	if c.AdminUser == "" || c.AdminPassHash == "" {
+		c.AdminUser = appCfg.AdminUser
+		c.AdminSalt = appCfg.AdminSalt
+		c.AdminPassHash = appCfg.AdminPassHash
+	}
+	appCfg = c
+	_ = saveConfigFile(c)
+	cfgMu.Unlock()
+
+	cnt, _, _ := applyConfigAndReload(c)
+	go triggerScan("deep")
+	writeJSON(w, http.StatusOK, map[string]interface{}{"status": "ok", "active_ports": cnt})
 }
 
 func handleIndex(w http.ResponseWriter, r *http.Request) {
@@ -1056,6 +1088,8 @@ func startWebDashboard(port int) {
 	mux.HandleFunc("/api/scan/stop", requireAuth(apiScanStop))
 	mux.HandleFunc("/api/settings/save", requireAuth(apiSaveSettings))
 	mux.HandleFunc("/api/export", requireAuth(apiExportWrapped))
+	mux.HandleFunc("/api/backup", requireAuth(apiBackupConfig))
+	mux.HandleFunc("/api/restore", requireAuth(apiRestoreConfig))
 
 	srv := &http.Server{
 		Addr:         fmt.Sprintf("0.0.0.0:%d", port),

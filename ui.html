@@ -3,188 +3,271 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ProxyShield v2.0 Pro - Intelligent Gateway</title>
+<title>ProxyShield v3.0 — Gateway &amp; VPS Monitor</title>
 <style>
-  :root { --bg:#090d16; --card:#111827; --card2:#0f172a; --border:#1f2937; --text:#e5e7eb; --muted:#9ca3af; --accent:#38bdf8; --green:#22c55e; --red:#ef4444; --amber:#f59e0b; }
-  * { box-sizing:border-box; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
-  body { margin:0; background:var(--bg); color:var(--text); font-size:13.5px; }
-  .hidden { display:none !important; }
-  .topbar { display:flex; justify-content:space-between; align-items:center; padding:10px 22px; background:var(--card2); border-bottom:1px solid var(--border); position:sticky; top:0; z-index:20; gap:10px; flex-wrap:wrap; }
-  .brand { font-weight:700; font-size:15.5px; color:var(--accent); display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-  .badge { padding:2px 8px; border-radius:999px; font-size:11px; font-weight:600; display:inline-block; }
-  .bg-green { background:rgba(34,197,94,0.14); color:var(--green); border:1px solid rgba(34,197,94,0.3); }
-  .bg-blue { background:rgba(56,189,248,0.14); color:var(--accent); border:1px solid rgba(56,189,248,0.3); }
-  .bg-amber { background:rgba(245,158,11,0.14); color:var(--amber); border:1px solid rgba(245,158,11,0.3); }
-  .bg-red { background:rgba(239,68,68,0.14); color:var(--red); border:1px solid rgba(239,68,68,0.3); }
-  .container { max-width:1480px; margin:0 auto; padding:16px 20px; }
-  .tabs { display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap; }
-  .tab { background:var(--card); border:1px solid var(--border); color:var(--muted); padding:8px 15px; border-radius:8px; cursor:pointer; font-weight:600; transition:0.15s; }
-  .tab:hover { color:var(--text); border-color:#374151; }
-  .tab.active { background:var(--accent); color:#090d16; border-color:var(--accent); }
-  .kpi-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(175px, 1fr)); gap:12px; margin-bottom:16px; }
-  .card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:15px; }
-  .kpi-label { color:var(--muted); font-size:11.5px; margin-bottom:5px; }
-  .kpi-val { font-size:20px; font-weight:700; }
-  .split-2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
-  @media (max-width: 960px) { .split-2 { grid-template-columns:1fr; } }
-  .btn { background:var(--accent); color:#090d16; border:none; padding:8px 14px; border-radius:6px; font-weight:600; cursor:pointer; font-size:12.5px; }
-  .btn:hover { opacity:0.9; }
-  .btn:disabled { opacity:0.5; cursor:not-allowed; }
-  .btn-sm { padding:4px 9px; font-size:11.5px; }
-  .btn-sec { background:#1f2937; color:var(--text); border:1px solid #374151; }
-  .btn-red { background:rgba(239,68,68,0.18); color:var(--red); border:1px solid rgba(239,68,68,0.4); }
-  .btn-green { background:rgba(34,197,94,0.18); color:var(--green); border:1px solid rgba(34,197,94,0.4); }
-  input, select, textarea { width:100%; background:var(--card2); border:1px solid #374151; color:var(--text); padding:8px 11px; border-radius:6px; font-size:12.5px; }
-  textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; line-height:1.45; resize:vertical; }
-  table { width:100%; border-collapse:collapse; font-size:12px; }
-  th, td { padding:8px 10px; text-align:left; border-bottom:1px solid var(--border); white-space:nowrap; }
-  th { color:var(--muted); font-weight:600; background:var(--card2); position:sticky; top:0; z-index:2; }
-  .table-wrap { overflow-x:auto; max-height:560px; border:1px solid var(--border); border-radius:8px; }
-  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px; }
-  .form-group { margin-bottom:12px; }
-  .form-group label { display:block; color:var(--muted); font-size:12px; margin-bottom:4px; }
-  .login-box { max-width:380px; margin:90px auto; background:var(--card); border:1px solid var(--border); border-radius:12px; padding:26px; }
-  .toast { position:fixed; bottom:20px; right:20px; background:var(--card2); border:1px solid var(--accent); padding:11px 16px; border-radius:8px; z-index:99; font-weight:600; box-shadow:0 8px 24px rgba(0,0,0,0.4); }
-  .prog-bar { height:8px; background:#1f2937; border-radius:999px; overflow:hidden; flex:1; min-width:140px; }
-  .prog-fill { height:100%; background:var(--green); width:0%; transition:width 0.25s; }
-  .pager { display:flex; justify-content:space-between; align-items:center; margin-top:10px; color:var(--muted); font-size:12px; }
+  :root {
+    --bg: #070b14; --bg2: #0d1322; --card: #111827; --border: #1e293b; --border2: #334155;
+    --text: #f1f5f9; --muted: #94a3b8; --accent: #38bdf8; --green: #22c55e; --red: #ef4444; --amber: #f59e0b;
+  }
+  * { box-sizing: border-box; font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.5; }
+  .hidden { display: none !important; }
+  .mono { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+  .topbar {
+    display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;
+    padding: 12px 24px; background: rgba(13,19,34,0.95); border-bottom: 1px solid var(--border);
+    position: sticky; top: 0; z-index: 30;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .brand-title { font-weight: 800; font-size: 17px; color: var(--accent); display: flex; align-items: center; gap: 8px; }
+  .pill { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--bg2); border: 1px solid var(--border); }
+  .pill-green { background: rgba(34,197,94,0.14); color: var(--green); border-color: rgba(34,197,94,0.35); }
+  .pill-blue  { background: rgba(56,189,248,0.14); color: var(--accent); border-color: rgba(56,189,248,0.35); }
+  .pill-amber { background: rgba(245,158,11,0.14); color: var(--amber); border-color: rgba(245,158,11,0.35); }
+  .pill-red   { background: rgba(239,68,68,0.14); color: var(--red); border-color: rgba(239,68,68,0.35); }
+
+  .container { width: 100%; max-width: 1760px; margin: 0 auto; padding: 18px 24px; }
+  @media (max-width: 768px) { .container { padding: 12px; } .topbar { padding: 10px 12px; } }
+
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 18px; }
+  .vps-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin-bottom: 16px; }
+  .split-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 1200px) { .vps-grid { grid-template-columns: repeat(3, 1fr); } }
+  @media (max-width: 860px) { .vps-grid { grid-template-columns: repeat(2, 1fr); } .split-2 { grid-template-columns: 1fr; } }
+  @media (max-width: 520px) { .vps-grid { grid-template-columns: 1fr; } }
+
+  .stat-head { display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--muted); font-weight: 600; margin-bottom: 6px; }
+  .stat-val { font-size: 20px; font-weight: 800; }
+  .stat-sub { font-size: 12px; color: var(--muted); margin-top: 6px; display: flex; justify-content: space-between; gap: 6px; flex-wrap: wrap; }
+  .meter { height: 7px; background: #1e293b; border-radius: 999px; overflow: hidden; margin-top: 8px; }
+  .meter-fill { height: 100%; border-radius: 999px; background: var(--accent); transition: width 0.35s ease; }
+
+  .tabs { display: flex; gap: 8px; margin-bottom: 16px; overflow-x: auto; padding-bottom: 4px; }
+  .tab { background: var(--card); border: 1px solid var(--border); color: var(--muted); padding: 10px 18px; border-radius: 9px; cursor: pointer; font-weight: 600; font-size: 13.5px; white-space: nowrap; }
+  .tab:hover { color: var(--text); border-color: var(--border2); }
+  .tab.active { background: var(--accent); color: #070b14; border-color: var(--accent); font-weight: 700; }
+
+  .btn { background: var(--accent); color: #070b14; border: none; padding: 9px 16px; border-radius: 8px; font-weight: 700; cursor: pointer; font-size: 13px; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .btn:hover { filter: brightness(1.08); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-sm { padding: 5px 10px; font-size: 12px; border-radius: 6px; }
+  .btn-sec { background: #1e293b; color: var(--text); border: 1px solid var(--border2); }
+  .btn-green { background: rgba(34,197,94,0.18); color: var(--green); border: 1px solid rgba(34,197,94,0.4); }
+  .btn-red { background: rgba(239,68,68,0.18); color: var(--red); border: 1px solid rgba(239,68,68,0.4); }
+
+  input, select, textarea { width: 100%; background: var(--bg2); border: 1px solid var(--border2); color: var(--text); padding: 10px 12px; border-radius: 8px; font-size: 13.5px; outline: none; }
+  input:focus, select:focus, textarea:focus { border-color: var(--accent); }
+  textarea { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; line-height: 1.5; resize: vertical; }
+
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+  .form-group { margin-bottom: 14px; }
+  .form-group label { display: block; color: var(--muted); font-size: 12.5px; font-weight: 600; margin-bottom: 5px; }
+
+  .table-wrap { overflow-x: auto; max-height: 520px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg2); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 700; font-size: 12px; text-transform: uppercase; background: #0f172a; position: sticky; top: 0; z-index: 2; }
+  tbody tr:hover { background: rgba(56,189,248,0.05); }
+  .pager { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; color: var(--muted); font-size: 13px; flex-wrap: wrap; gap: 10px; }
+
+  .login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
+  .login-box { width: 100%; max-width: 420px; background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 30px; box-shadow: 0 20px 50px rgba(0,0,0,0.5); }
+  .toast { position: fixed; bottom: 24px; right: 24px; background: #0f172a; border: 1px solid var(--accent); color: var(--text); padding: 12px 18px; border-radius: 10px; z-index: 99; font-weight: 600; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
 </style>
 </head>
 <body>
 
-<div id="loginView" class="login-box hidden">
-  <h2 id="loginTitle" style="margin-top:0;color:var(--accent)">ProxyShield v2.0 Pro</h2>
-  <p id="loginSub" style="color:var(--muted);font-size:12.5px;margin-bottom:18px">Dang nhap he thong Gateway &amp; Deep Inspector</p>
-  <div class="form-group"><label>Tai khoan Admin</label><input id="lu" placeholder="Nhap username..." value="admin"></div>
-  <div class="form-group"><label>Mat khau</label><input id="lp" type="password" placeholder="Nhap mat khau..." onkeydown="if(event.key==='Enter')doLogin()"></div>
-  <button id="loginBtn" class="btn" style="width:100%" onclick="doLogin()">Dang nhap</button>
-  <div id="lerr" style="color:var(--red);margin-top:10px;font-size:12px"></div>
+<div id="loginView" class="login-wrap hidden">
+  <div class="login-box">
+    <h2 id="loginTitle" style="margin:0 0 8px 0;color:var(--accent)">ProxyShield v3.0</h2>
+    <p id="loginSub" style="color:var(--muted);font-size:13.5px;margin:0 0 20px 0">Đăng nhập hệ thống quản lý Proxy</p>
+    <div class="form-group"><label>Tài khoản Admin</label><input id="lu" placeholder="Nhập username..." value="admin"></div>
+    <div class="form-group"><label>Mật khẩu</label><input id="lp" type="password" placeholder="Nhập mật khẩu..." onkeydown="if(event.key==='Enter')doLogin()"></div>
+    <button id="loginBtn" class="btn" style="width:100%;justify-content:center;padding:11px" onclick="doLogin()">Đăng nhập</button>
+    <div id="lerr" style="color:var(--red);margin-top:12px;font-size:13px;font-weight:600"></div>
+  </div>
 </div>
 
 <div id="appView" class="hidden">
   <div class="topbar">
     <div class="brand">
-      <span>ProxyShield v2.0 Pro</span>
-      <span id="pubIpBadge" class="badge bg-blue mono">Oracle IP: ...</span>
-      <span id="sysBadge" class="badge bg-green mono">RAM: ...</span>
-      <span id="connBadge" class="badge bg-blue mono">Conntrack: ...</span>
-      <span id="credBadge" class="badge bg-amber mono">Auth: ...</span>
+      <div class="brand-title"><span>ProxyShield v3.0</span></div>
+      <span id="pubIpBadge" class="pill pill-blue mono">IP VPS: ...</span>
+      <span id="uptimeBadge" class="pill mono">Uptime: ...</span>
+      <span id="autoBadge" class="pill pill-green mono">Auto-Check: 5p</span>
+      <span id="credBadge" class="pill pill-amber mono">Auth: ...</span>
     </div>
     <div style="display:flex;gap:8px;align-items:center">
-      <button class="btn btn-sec btn-sm" onclick="togglePause()" id="pauseBtn">Auto-Refresh: 2s</button>
-      <button class="btn btn-sec btn-sm" onclick="logout()">Dang xuat</button>
+      <button class="btn btn-sec btn-sm" onclick="togglePause()" id="pauseBtn">Tự động: 2s</button>
+      <button class="btn btn-sec btn-sm" onclick="logout()">Đăng xuất</button>
     </div>
   </div>
 
   <div class="container">
-    <div class="kpi-grid">
-      <div class="card"><div class="kpi-label">Cong Dang Chay (Ports)</div><div id="kPorts" class="kpi-val">0</div><div id="kHealthSub" style="font-size:11px;color:var(--muted);margin-top:3px">Alive: 0 | Dead: 0</div></div>
-      <div class="card"><div class="kpi-label">Ket Noi LIVE</div><div id="kActive" class="kpi-val" style="color:var(--accent)">0</div><div id="kRpsSub" style="font-size:11px;color:var(--muted);margin-top:3px">0.0 req/s</div></div>
-      <div class="card"><div class="kpi-label">Tong Request / Tay Trang</div><div id="kReqs" class="kpi-val">0</div><div id="kSanSub" style="font-size:11px;color:var(--green);margin-top:3px">Sanitized: 0</div></div>
-      <div class="card"><div class="kpi-label">Tong Luu Luong (Up / Down)</div><div id="kTraffic" class="kpi-val" style="font-size:16px">0 / 0</div><div id="kSpeedSub" style="font-size:11px;color:var(--muted);margin-top:3px">0 / 0 KB/s</div></div>
-      <div class="card"><div class="kpi-label">Loi Upstream / Auth</div><div id="kErr" class="kpi-val" style="color:var(--red)">0</div><div id="kLoadSub" style="font-size:11px;color:var(--muted);margin-top:3px">Load: -</div></div>
-      <div class="card" style="padding:10px 14px">
-        <div class="kpi-label">Luu luong 2 phut qua (KB/s)</div>
-        <svg id="sparkSvg" viewBox="0 0 240 46" style="width:100%;height:46px;display:block"></svg>
+    <!-- THANH ĐO THÔNG SỐ VPS & BANDWIDTH THÁNG -->
+    <div class="vps-grid">
+      <div class="card">
+        <div class="stat-head"><span>CPU &amp; Tải VPS</span><span id="vCpuCores" class="mono">- Core</span></div>
+        <div id="vCpuVal" class="stat-val">0.0%</div>
+        <div class="meter"><div id="vCpuBar" class="meter-fill" style="width:0%"></div></div>
+        <div class="stat-sub"><span>Load: <b id="vLoad" class="mono">-</b></span><span id="vGoCnt" class="mono">Go: 0</span></div>
+      </div>
+
+      <div class="card">
+        <div class="stat-head"><span>RAM &amp; Disk VPS</span><span id="vDiskSub" class="mono">Disk: 0/0 GB</span></div>
+        <div id="vRamVal" class="stat-val">0 / 0 GB</div>
+        <div class="meter"><div id="vRamBar" class="meter-fill" style="width:0%"></div></div>
+        <div class="stat-sub"><span id="vRamPct">0% RAM</span><span id="vFdsSub" class="mono">FDs: 0</span></div>
+      </div>
+
+      <div class="card">
+        <div class="stat-head"><span>Cổng &amp; Sức Khỏe Proxy</span><span id="kActive" class="pill pill-blue" style="padding:1px 7px;font-size:11px">LIVE: 0</span></div>
+        <div id="kPorts" class="stat-val">0 cổng</div>
+        <div class="meter"><div id="kAliveBar" class="meter-fill" style="width:0%;background:var(--green)"></div></div>
+        <div class="stat-sub"><span id="kHealthSub" style="color:var(--green)">Sống: 0 | Chết: 0</span><span id="kSanSub" class="mono">Đã ẩn: 0</span></div>
+      </div>
+
+      <div class="card">
+        <div class="stat-head"><span>Mạng NIC Thực Tế &amp; Conntrack</span><span id="vConnSub" class="mono">0/0</span></div>
+        <div id="vNicVal" class="stat-val" style="font-size:17px">↑ 0.0 | ↓ 0.0 Mbps</div>
+        <div class="meter"><div id="vConnBar" class="meter-fill" style="width:0%"></div></div>
+        <div class="stat-sub"><span id="kReqsSub">0 reqs</span><span id="kErrSub" style="color:var(--red)">Lỗi: 0</span></div>
+      </div>
+
+      <div class="card">
+        <div class="stat-head"><span>Tổng Bandwidth Tháng</span><span id="vQuotaBadge" class="pill pill-green" style="padding:1px 7px;font-size:10.5px">AN TOÀN</span></div>
+        <div id="vQuotaVal" class="stat-val" style="font-size:17px">0 GB / 10 TB</div>
+        <div class="meter"><div id="vQuotaBar" class="meter-fill" style="width:0%;background:var(--green)"></div></div>
+        <div class="stat-sub"><span id="vQuotaProj">Dự báo: ~0 GB</span><span id="vMonthRx" class="mono">In: 0 GB</span></div>
       </div>
     </div>
 
+    <!-- CHỈ 3 TAB TINH GỌN, DỄ HIỂU -->
     <div class="tabs">
-      <button class="tab active" onclick="switchTab('studio', this)">Paste &amp; Xuat Proxy (2 Chieu)</button>
-      <button class="tab" onclick="switchTab('requests', this)">Live Requests Inspector</button>
-      <button class="tab" onclick="switchTab('ports', this)">Quet &amp; Suc Khoe Cong (1000+)</button>
-      <button class="tab" onclick="switchTab('domains', this)">Domain Intelligence</button>
-      <button class="tab" onclick="switchTab('settings', this)">Tai Khoan &amp; Bo Loc DoH</button>
+      <button class="tab active" onclick="switchTab('proxies', this)">1. Quản Lý &amp; Bọc Proxy</button>
+      <button class="tab" onclick="switchTab('requests', this)">2. Theo Dõi Request (Logs)</button>
+      <button class="tab" onclick="switchTab('settings', this)">3. Cài Đặt Hệ Thống (All-in-One)</button>
     </div>
 
-    <!-- TAB 1: PASTE & XUAT PROXY STUDIO -->
-    <div id="tab-studio" class="split-2">
-      <div class="card">
-        <div class="row" style="justify-content:space-between;margin-bottom:8px">
-          <h3 style="margin:0">1. Paste Proxy Nguon (Webshare / IP-Auth)</h3>
-          <label class="btn btn-sec btn-sm" style="cursor:pointer;margin:0">
-            Tai File .txt<input type="file" accept=".txt,.list" style="display:none" onchange="uploadProxyFile(event)">
-          </label>
+    <!-- TAB 1: QUẢN LÝ, BỌC 1:1 & AUTO-CHECK -->
+    <div id="tab-proxies">
+      <div class="split-2" style="margin-bottom:16px">
+        <div class="card">
+          <div class="row" style="justify-content:space-between;margin-bottom:8px">
+            <h3 style="margin:0;font-size:16px">Dán Proxy Nguồn Vào Đây</h3>
+            <label class="btn btn-sec btn-sm" style="cursor:pointer;margin:0">
+              Tải File .txt<input type="file" accept=".txt,.list" style="display:none" onchange="uploadProxyFile(event)">
+            </label>
+          </div>
+          <div class="row">
+            <select id="defUpProto" style="max-width:230px" onchange="analyzeInputBox()">
+              <option value="http">Dòng không ghi prefix &rarr; HTTP</option>
+              <option value="socks5">Dòng không ghi prefix &rarr; SOCKS5</option>
+            </select>
+            <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);cursor:pointer">
+              <input type="checkbox" id="chkDedup" checked style="width:auto"> Tự lọc trùng
+            </label>
+            <span id="inCountBadge" class="pill pill-blue mono">0 hợp lệ</span>
+          </div>
+          <textarea id="proxiesBox" rows="11" oninput="analyzeInputBox()" placeholder="Dán danh sách proxy (đầu vào giao thức nào giữ nguyên giao thức đó):&#10;http://user:pass@198.12.102.93:40540&#10;socks5://50.114.8.42:5432&#10;50.114.98.199:5432"></textarea>
+          <div class="row" style="margin-top:12px;margin-bottom:0">
+            <button class="btn" onclick="saveProxies()">Lưu, Bọc &amp; Tự Test Ngay</button>
+            <button class="btn btn-green" onclick="startScan('deep')">Check Lại Toàn Bộ Bằng IP VPS</button>
+            <button class="btn btn-red" onclick="removeDead()">Xóa Proxy Chết (DIE)</button>
+          </div>
         </div>
-        <div class="row">
-          <select id="defUpProto" style="max-width:210px" onchange="analyzeInputBox()">
-            <option value="socks5">Dong ko prefix -&gt; SOCKS5</option>
-            <option value="http">Dong ko prefix -&gt; HTTP</option>
-          </select>
-          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);cursor:pointer">
-            <input type="checkbox" id="chkDedup" checked style="width:auto"> Tu loc trung khi luu
-          </label>
-          <span id="inCountBadge" class="badge bg-blue mono">0 hop le</span>
-        </div>
-        <textarea id="proxiesBox" rows="16" oninput="analyzeInputBox()" placeholder="Ho tro moi dinh dang:&#10;50.114.8.42:5432&#10;50.114.98.199:5432:user:pass&#10;socks5://user:pass@23.27.78.52:5432&#10;http://142.111.239.119:5432"></textarea>
-        <div class="row" style="margin-top:12px">
-          <button class="btn" onclick="saveProxies()">Luu &amp; Boc Proxy Ngay (Hot-Reload)</button>
-          <button class="btn btn-green" onclick="startScan('quick')">Quet Nhanh</button>
-          <button class="btn btn-sec" onclick="startScan('deep')">Quet Sau + Exit IP</button>
-          <button class="btn btn-red" onclick="removeDead()">Xoa Cong DEAD</button>
+
+        <div class="card">
+          <div class="row" style="justify-content:space-between;margin-bottom:8px">
+            <h3 style="margin:0;font-size:16px">Proxy Đã Bọc (Đầu Vào Nào &rarr; Đầu Ra Đó)</h3>
+            <span id="outCountBadge" class="pill pill-green mono">0 sẵn sàng</span>
+          </div>
+          <div class="row">
+            <select id="expFilter" style="max-width:240px" onchange="refreshOutputBox()">
+              <option value="all">Xuất tất cả cổng đang chạy</option>
+              <option value="alive">Chỉ lấy proxy ĐANG SỐNG (LIVE)</option>
+              <option value="hide_dead">Ẩn proxy ĐÃ CHẾT (DIE)</option>
+            </select>
+            <span style="font-size:12.5px;color:var(--muted)">Khớp 1:1 giao thức gốc (<span class="mono">http&rarr;http</span>, <span class="mono">socks5&rarr;socks5</span>)</span>
+          </div>
+          <textarea id="outputBox" rows="11" readonly placeholder="Danh sách proxy đã bọc qua IP VPS này sẽ tự hiện ở đây..."></textarea>
+          <div class="row" style="margin-top:12px;margin-bottom:0">
+            <button class="btn" onclick="copyOutputBox()">Copy Toàn Bộ Danh Sách</button>
+            <button class="btn btn-sec" onclick="downloadOutputBox()">Tải Về File .txt</button>
+          </div>
         </div>
       </div>
 
+      <!-- BẢNG TRẠNG THÁI TỪNG CỔNG -->
       <div class="card">
-        <div class="row" style="justify-content:space-between;margin-bottom:8px">
-          <h3 style="margin:0">2. Xuat Proxy Da Boc Theo Yeu Cau</h3>
-          <span id="outCountBadge" class="badge bg-green mono">0 cong san sang</span>
+        <div class="row" style="justify-content:space-between">
+          <div class="row" style="margin:0;flex:1">
+            <input id="pq" placeholder="Tìm cổng, IP nguồn, Exit IP..." style="max-width:250px" oninput="portPage=1;lastPortSig='';loadPorts()">
+            <select id="pfilter" style="max-width:170px" onchange="portPage=1;lastPortSig='';loadPorts()">
+              <option value="all">Tất cả cổng</option>
+              <option value="alive">Đang SỐNG (LIVE)</option>
+              <option value="dead">Bị CHẾT (DIE)</option>
+              <option value="untested">Chờ kiểm tra</option>
+              <option value="err">Có lỗi kết nối</option>
+            </select>
+            <select id="psort" style="max-width:180px" onchange="portPage=1;lastPortSig='';loadPorts()">
+              <option value="port">Sắp xếp: Số cổng</option>
+              <option value="traffic">Sắp xếp: Lưu lượng</option>
+              <option value="err">Sắp xếp: Nhiều lỗi</option>
+              <option value="latency">Sắp xếp: Ping cao</option>
+            </select>
+          </div>
+          <div id="scanProgressRow" class="row hidden" style="margin:0;min-width:280px">
+            <span id="scanText" class="mono" style="font-size:12px">Đang test: 0/0</span>
+            <div class="meter" style="flex:1;margin:0"><div id="scanBar" class="meter-fill" style="background:var(--green);width:0%"></div></div>
+            <button class="btn btn-red btn-sm" onclick="stopScan()">Dừng</button>
+          </div>
         </div>
-        <div class="row">
-          <select id="expPreset" style="max-width:260px" onchange="onPresetChange()">
-            <option value="socks5://{user}:{pass}@{ip}:{port}">SOCKS5 (ByteLixir): socks5://user:pass@ip:port</option>
-            <option value="http://{user}:{pass}@{ip}:{port}">HTTP: http://user:pass@ip:port</option>
-            <option value="{ip}:{port}:{user}:{pass}">ip:port:user:pass</option>
-            <option value="{user}:{pass}@{ip}:{port}">user:pass@ip:port</option>
-            <option value="custom">Tu nhap Template tuy chinh...</option>
-          </select>
-          <select id="expFilter" style="max-width:190px" onchange="refreshOutputStudio()">
-            <option value="all">Xuat tat ca cong</option>
-            <option value="alive">Chi lay proxy ALIVE</option>
-            <option value="hide_dead">Loai bo proxy DEAD</option>
-          </select>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Cổng VPS</th><th>Proxy Nguồn</th><th>Loại</th><th>Trạng thái (Check IP VPS)</th><th>Ping</th>
+                <th>Exit IP Thực Tế</th><th>Đang chạy</th><th>Lượt Req</th><th>Đã ẩn Domain</th><th>Lỗi</th><th>Up / Down</th><th>Chi tiết lỗi</th><th>Test</th>
+              </tr>
+            </thead>
+            <tbody id="portBody"></tbody>
+          </table>
         </div>
-        <div id="customTmplRow" class="form-group hidden">
-          <label>Custom Template (Bien: {user}, {pass}, {ip}, {port}, {upstream}, {exit_ip})</label>
-          <input id="customTmpl" value="socks5://{user}:{pass}@{ip}:{port}" oninput="refreshOutputStudio()">
-        </div>
-        <textarea id="outputBox" rows="16" readonly placeholder="Danh sach proxy da boc se tu dong hien o day..."></textarea>
-        <div class="row" style="margin-top:12px">
-          <button class="btn" onclick="copyOutputBox()">Copy Toan Bo Output</button>
-          <button class="btn btn-sec" onclick="downloadOutputBox()">Tai Ve File .txt</button>
-          <button class="btn btn-sec" onclick="refreshOutputStudio()">Lam moi Output</button>
+        <div class="pager">
+          <span id="portPagerInfo">0 cổng</span>
+          <div style="display:flex;gap:8px;align-items:center">
+            <button class="btn btn-sec btn-sm" onclick="if(portPage>1){portPage--;lastPortSig='';loadPorts();}">&laquo; Trước</button>
+            <span id="portPageNum" class="mono">Trang 1</span>
+            <button class="btn btn-sec btn-sm" onclick="if(portPage*50<portTotal){portPage++;lastPortSig='';loadPorts();}">Sau &raquo;</button>
+          </div>
         </div>
       </div>
     </div>
 
-    <!-- TAB 2: LIVE REQUESTS INSPECTOR -->
+    <!-- TAB 2: THEO DÕI REQUEST (LOGS) -->
     <div id="tab-requests" class="card hidden">
       <div class="row">
-        <input id="fq" placeholder="Tim domain, IP, upstream, loi..." style="max-width:260px" oninput="loadRequests()">
-        <select id="fact" style="max-width:175px" onchange="loadRequests()">
-          <option value="ALL">Tat ca hanh dong</option>
-          <option value="LIVE">Dang chay (LIVE)</option>
-          <option value="SANITIZED">Da tay trang (DoH IP)</option>
-          <option value="DIRECT">Giu nguyen domain</option>
-          <option value="ERR">Bi loi (ERR)</option>
+        <input id="fq" placeholder="Tìm domain, IP, cổng, lỗi..." style="max-width:260px" oninput="lastReqSig='';loadRequests()">
+        <select id="fact" style="max-width:190px" onchange="lastReqSig='';loadRequests()">
+          <option value="ALL">Tất cả Request</option>
+          <option value="LIVE">Đang chạy (LIVE)</option>
+          <option value="SANITIZED">Đã ẩn thành IP (DoH)</option>
+          <option value="DIRECT">Giữ nguyên Domain</option>
+          <option value="ERR">Bị lỗi (ERR)</option>
         </select>
-        <select id="fproto" style="max-width:140px" onchange="loadRequests()">
-          <option value="ALL">Moi giao thuc</option>
-          <option value="SOCKS5">SOCKS5</option>
-          <option value="HTTP">HTTP</option>
-        </select>
-        <input id="fport" placeholder="Cong (10001)" style="max-width:120px" oninput="loadRequests()">
-        <button class="btn btn-sec" onclick="exportCSV()">Tai CSV</button>
-        <button class="btn btn-red" onclick="clearLogs()">Xoa lich su</button>
+        <input id="fport" placeholder="Cổng (10001)" style="max-width:130px" oninput="lastReqSig='';loadRequests()">
+        <button class="btn btn-sec" onclick="exportCSV()">Tải CSV</button>
+        <button class="btn btn-red" onclick="clearLogs()">Xóa lịch sử</button>
       </div>
       <div class="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>Time</th><th>Port</th><th>Client IP</th><th>Original Target (Client gui)</th>
-              <th>Sent to Webshare</th><th>Mode</th><th>Upstream</th><th>Proto</th>
-              <th>Bytes (Up / Down)</th><th>Duration</th><th>Status / Error</th>
+              <th>Thời gian</th><th>Cổng</th><th>IP Gọi Vào</th><th>Domain Gốc</th>
+              <th>Đích Gửi Sang Nguồn</th><th>Ẩn Domain?</th><th>Giao thức</th>
+              <th>Dung lượng</th><th>Thời lượng</th><th>Kết quả</th><th>Thao tác nhanh</th>
             </tr>
           </thead>
           <tbody id="reqBody"></tbody>
@@ -192,103 +275,37 @@
       </div>
     </div>
 
-    <!-- TAB 3: PAGINATED PORTS & HEALTH SCANNER -->
-    <div id="tab-ports" class="card hidden">
-      <div class="row">
-        <input id="pq" placeholder="Tim cong, IP Webshare, Exit IP, loi..." style="max-width:240px" oninput="portPage=1;loadPorts()">
-        <select id="pfilter" style="max-width:160px" onchange="portPage=1;loadPorts()">
-          <option value="all">Tat ca cong</option>
-          <option value="alive">Chi ALIVE</option>
-          <option value="dead">Chi DEAD</option>
-          <option value="untested">Chua test</option>
-          <option value="active">Dang co ket noi</option>
-          <option value="err">Co loi</option>
-        </select>
-        <select id="psort" style="max-width:160px" onchange="portPage=1;loadPorts()">
-          <option value="port">Sap xep: So cong</option>
-          <option value="traffic">Sap xep: Luu luong</option>
-          <option value="reqs">Sap xep: Tong Req</option>
-          <option value="err">Sap xep: So loi</option>
-          <option value="latency">Sap xep: Ping cao</option>
-        </select>
-        <button class="btn btn-green" onclick="startScan('quick')">Quet Nhanh (50 luong)</button>
-        <button class="btn btn-sec" onclick="startScan('deep')">Quet Sau + Exit IP</button>
-        <button class="btn btn-red" onclick="removeDead()">Xoa Cong DEAD</button>
-        <button class="btn btn-red hidden" id="stopScanBtn" onclick="stopScan()">Dung Quet</button>
-      </div>
-      <div id="scanProgressRow" class="row hidden" style="background:var(--card2);padding:10px 14px;border-radius:8px;border:1px solid var(--border)">
-        <span id="scanText" class="mono" style="font-size:12px">Dang quet: 0 / 0</span>
-        <div class="prog-bar"><div id="scanBar" class="prog-fill"></div></div>
-      </div>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Local Port</th><th>Upstream Proxy</th><th>Proto</th><th>Health</th><th>Ping</th>
-              <th>Exit IP (Thuc te)</th><th>Live</th><th>Reqs</th><th>Sanitized</th><th>Err</th>
-              <th>Up / Down</th><th>Last Error</th><th>Test</th>
-            </tr>
-          </thead>
-          <tbody id="portBody"></tbody>
-        </table>
-      </div>
-      <div class="pager">
-        <span id="portPagerInfo">0 cong</span>
-        <div style="display:flex;gap:8px">
-          <button class="btn btn-sec btn-sm" onclick="if(portPage>1){portPage--;loadPorts();}">&laquo; Truoc</button>
-          <span id="portPageNum" class="mono" style="padding:4px 8px">Trang 1</span>
-          <button class="btn btn-sec btn-sm" onclick="if(portPage*50<portTotal){portPage++;loadPorts();}">Sau &raquo;</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- TAB 4: DOMAIN INTELLIGENCE -->
-    <div id="tab-domains" class="card hidden">
-      <div class="row">
-        <input id="dq" placeholder="Loc ten mien hoac IP DoH..." style="max-width:250px" oninput="loadDomains()">
-        <select id="dfilter" style="max-width:190px" onchange="loadDomains()">
-          <option value="all">Moi Domain (Top 150)</option>
-          <option value="sanitized">Dang duoc Tay Trang</option>
-          <option value="direct">Chua Tay Trang (Direct)</option>
-          <option value="err">Co loi phat sinh</option>
-        </select>
-        <span style="color:var(--muted);font-size:12px">Phat hien domain la cua ByteLixir? Bam "+ Tay trang" de an khoi Webshare ngay!</span>
-      </div>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Domain</th><th>Trang thai Bo loc</th><th>IP DoH gan nhat</th><th>Luot goi</th>
-              <th>Da Tay Trang</th><th>Loi</th><th>Tong Data</th><th>Lan cuoi</th><th>Hanh dong nhanh</th>
-            </tr>
-          </thead>
-          <tbody id="domBody"></tbody>
-        </table>
-      </div>
-    </div>
-
-    <!-- TAB 5: SETTINGS & AUTH -->
-    <div id="tab-settings" class="card hidden" style="max-width:740px">
-      <h3 style="margin-top:0">Cau hinh Tai khoan Proxy &amp; Bo loc DoH</h3>
+    <!-- TAB 3: CÀI ĐẶT ALL-IN-ONE & BACKUP -->
+    <div id="tab-settings" class="card hidden" style="max-width:860px">
+      <h3 style="margin-top:0">Cài Đặt Toàn Bộ Hệ Thống (Lưu Tự Động Chống Mất Khi Reboot)</h3>
       <div class="split-2">
-        <div class="form-group"><label>Proxy Auth Username</label><input id="sProxyUser"></div>
+        <div class="form-group"><label>Tài khoản Proxy (Username)</label><input id="sProxyUser"></div>
         <div class="form-group">
-          <label>Proxy Auth Password</label>
-          <div style="display:flex;gap:6px">
-            <input id="sProxyPass">
-            <button class="btn btn-sec btn-sm" type="button" onclick="genRandomPass()" style="white-space:nowrap">Random</button>
-          </div>
+          <label>Mật khẩu Proxy (Password)</label>
+          <div style="display:flex;gap:8px"><input id="sProxyPass"><button class="btn btn-sec btn-sm" type="button" onclick="genRandomPass()">Random</button></div>
         </div>
       </div>
-      <div class="form-group"><label>Cong bat dau (Start Port)</label><input id="sStartPort" type="number"></div>
-      <div class="form-group"><label>Tu khoa Domain can Tay Trang DoH (cach nhau dau phay)</label><input id="sKeywords"></div>
+      <div class="split-2">
+        <div class="form-group"><label>Cổng Proxy Bắt Đầu (Start Port)</label><input id="sStartPort" type="number"></div>
+        <div class="form-group"><label>Tự động Check Live mỗi (phút) — 0 để tắt</label><input id="sAutoCheck" type="number" min="0" max="1440"></div>
+      </div>
+      <div class="split-2">
+        <div class="form-group"><label>Hạn mức Bandwidth Tháng (TB) — 10 cho Oracle Free, 0 = Không giới hạn</label><input id="sQuotaTB" type="number" step="0.5" min="0"></div>
+        <div class="form-group"><label>Từ khóa Domain cần Ẩn khỏi Nhà cung cấp (cách nhau dấu phẩy)</label><input id="sKeywords"></div>
+      </div>
       <hr style="border:0;border-top:1px solid var(--border);margin:18px 0">
-      <h4 style="margin-top:0">Doi Tai khoan / Mat khau Admin Dashboard</h4>
+      <h4 style="margin-top:0">Tài Khoản Admin Đăng Nhập Web</h4>
       <div class="split-2">
         <div class="form-group"><label>Admin Username</label><input id="sAdminUser"></div>
-        <div class="form-group"><label>Mat khau Admin moi (bo trong neu giu cu)</label><input id="sAdminPass" type="password"></div>
+        <div class="form-group"><label>Mật khẩu Admin mới (để trống nếu giữ nguyên)</label><input id="sAdminPass" type="password"></div>
       </div>
-      <button class="btn" onclick="saveSettings()">Luu &amp; Ap Dung Cau Hinh</button>
+      <div class="row" style="margin-top:10px">
+        <button class="btn" onclick="saveSettings()">Lưu Toàn Bộ Cài Đặt</button>
+        <a class="btn btn-sec" href="/api/backup" style="text-decoration:none">Tải File Backup (.json)</a>
+        <label class="btn btn-sec" style="cursor:pointer;margin:0">
+          Khôi Phục Từ Backup (.json)<input type="file" accept=".json" style="display:none" onchange="restoreBackup(event)">
+        </label>
+      </div>
     </div>
   </div>
 </div>
@@ -296,72 +313,54 @@
 <div id="toast" class="toast hidden"></div>
 
 <script>
-var paused = false;
-var currentTab = 'studio';
-var portPage = 1;
-var portTotal = 0;
+var paused = false, currentTab = 'proxies', portPage = 1, portTotal = 0;
+var lastPortSig = '', lastReqSig = '';
 
 function toast(msg) {
   var el = document.getElementById('toast');
-  el.textContent = msg;
-  el.classList.remove('hidden');
+  el.textContent = msg; el.classList.remove('hidden');
   setTimeout(function() { el.classList.add('hidden'); }, 3200);
 }
-
 function fmtBytes(b) {
   if (!b || b <= 0) return '0 B';
   if (b < 1024) return b + ' B';
   if (b < 1048576) return (b / 1024).toFixed(1) + ' KB';
   if (b < 1073741824) return (b / 1048576).toFixed(2) + ' MB';
-  return (b / 1073741824).toFixed(2) + ' GB';
+  if (b < 1099511627776) return (b / 1073741824).toFixed(2) + ' GB';
+  return (b / 1099511627776).toFixed(2) + ' TB';
 }
-
-function esc(s) {
-  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+function fmtUptime(s) {
+  s = Math.max(0, s || 0);
+  var d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
+  return d > 0 ? d + 'd ' + h + 'h' : (h > 0 ? h + 'h ' + m + 'm' : m + 'm');
 }
-
-function isSelectingText() {
-  var sel = window.getSelection ? window.getSelection().toString() : '';
-  return sel && sel.length > 0;
-}
+function esc(s) { return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function isSelecting() { var s = window.getSelection ? window.getSelection().toString() : ''; return s && s.length > 0; }
+function meterColor(p) { return p >= 85 ? 'var(--red)' : (p >= 65 ? 'var(--amber)' : 'var(--green)'); }
 
 async function copyTextSafe(txt) {
-  if (navigator.clipboard && window.isSecureContext) {
-    await navigator.clipboard.writeText(txt);
-    return;
-  }
-  var ta = document.createElement('textarea');
-  ta.value = txt;
-  ta.style.position = 'fixed';
-  ta.style.left = '-9999px';
-  document.body.appendChild(ta);
-  ta.focus();
-  ta.select();
-  document.execCommand('copy');
-  document.body.removeChild(ta);
+  if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(txt); return; }
+  var ta = document.createElement('textarea'); ta.value = txt;
+  ta.style.position = 'fixed'; ta.style.left = '-9999px';
+  document.body.appendChild(ta); ta.focus(); ta.select();
+  document.execCommand('copy'); document.body.removeChild(ta);
 }
-
 function genRandomPass() {
-  var chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
-  var res = '';
-  for (var i = 0; i < 14; i++) res += chars.charAt(Math.floor(Math.random() * chars.length));
-  document.getElementById('sProxyPass').value = res;
+  var c = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789', r = '';
+  for (var i = 0; i < 14; i++) r += c.charAt(Math.floor(Math.random() * c.length));
+  document.getElementById('sProxyPass').value = r;
 }
 
 async function checkAuthStatus() {
   try {
-    var r = await fetch('/api/auth/status');
-    var d = await r.json();
-    var isSetup = !!d.setup_required;
-    document.getElementById('loginTitle').textContent = isSetup ? 'Tao Tai Khoan Admin Lan Dau' : 'ProxyShield v2.0 Pro';
-    document.getElementById('loginSub').textContent = isSetup ? 'Chua co tai khoan. Hay nhap User & Mat khau ban muon tao de dang nhap:' : 'Dang nhap he thong Gateway & Deep Inspector';
-    document.getElementById('loginBtn').textContent = isSetup ? 'Tao Tai Khoan & Dang Nhap' : 'Dang nhap';
-    if (isSetup && document.getElementById('lu').value === 'admin') {
-      document.getElementById('lu').value = '';
-    }
+    var d = await (await fetch('/api/auth/status')).json();
+    var s = !!d.setup_required;
+    document.getElementById('loginTitle').textContent = s ? 'Tạo Tài Khoản Admin Lần Đầu' : 'ProxyShield v3.0';
+    document.getElementById('loginSub').textContent = s ? 'Nhập Username & Mật khẩu bạn muốn tạo để đăng nhập:' : 'Đăng nhập hệ thống quản lý Proxy';
+    document.getElementById('loginBtn').textContent = s ? 'Tạo Tài Khoản & Đăng Nhập' : 'Đăng nhập';
+    if (s && document.getElementById('lu').value === 'admin') document.getElementById('lu').value = '';
   } catch (e) {}
 }
-
 async function api(url, opts) {
   var r = await fetch(url, opts);
   if (r.status === 401) {
@@ -372,124 +371,120 @@ async function api(url, opts) {
   }
   return r;
 }
-
 async function doLogin() {
-  var u = document.getElementById('lu').value;
-  var p = document.getElementById('lp').value;
   document.getElementById('lerr').textContent = '';
   var r = await fetch('/api/login', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({username: u, password: p})
+    body: JSON.stringify({username: document.getElementById('lu').value, password: document.getElementById('lp').value})
   });
   var d = await r.json();
-  if (!r.ok) { document.getElementById('lerr').textContent = d.error || 'Loi dang nhap'; return; }
+  if (!r.ok) { document.getElementById('lerr').textContent = d.error || 'Lỗi đăng nhập'; return; }
   initApp();
 }
-
-async function logout() {
-  await fetch('/api/logout');
-  location.reload();
-}
+async function logout() { await fetch('/api/logout'); location.reload(); }
 
 function switchTab(name, btn) {
   currentTab = name;
   document.querySelectorAll('.tab').forEach(function(t){ t.classList.remove('active'); });
   if (btn) btn.classList.add('active');
-  ['studio', 'requests', 'ports', 'domains', 'settings'].forEach(function(id) {
+  ['proxies', 'requests', 'settings'].forEach(function(id) {
     document.getElementById('tab-' + id).classList.toggle('hidden', id !== name);
   });
-  if (name === 'studio') { loadConfig(); refreshOutputStudio(); }
+  if (name === 'proxies') { lastPortSig = ''; loadPorts(); refreshOutputBox(); }
+  if (name === 'requests') { lastReqSig = ''; loadRequests(); }
   if (name === 'settings') loadConfig();
-  if (name === 'requests') loadRequests();
-  if (name === 'ports') loadPorts();
-  if (name === 'domains') loadDomains();
-}
-
-function renderSparkline(pts) {
-  var svg = document.getElementById('sparkSvg');
-  if (!pts || pts.length < 2) { svg.innerHTML = ''; return; }
-  var maxV = 1;
-  pts.forEach(function(p) {
-    var tot = (p.up_kbps || 0) + (p.dn_kbps || 0);
-    if (tot > maxV) maxV = tot;
-  });
-  var w = 240, h = 44, step = w / (pts.length - 1);
-  var dPath = '';
-  pts.forEach(function(p, idx) {
-    var x = (idx * step).toFixed(1);
-    var tot = (p.up_kbps || 0) + (p.dn_kbps || 0);
-    var y = (h - 2 - (tot / maxV) * (h - 6)).toFixed(1);
-    dPath += (idx === 0 ? 'M' : 'L') + x + ' ' + y + ' ';
-  });
-  svg.innerHTML = '<path d="' + dPath + '" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linejoin="round"/>';
 }
 
 async function loadOverview() {
   try {
-    var r = await api('/api/overview');
-    var d = await r.json();
-    document.getElementById('pubIpBadge').textContent = 'Oracle IP: ' + d.public_ip;
-    document.getElementById('sysBadge').textContent = 'RAM: ' + d.mem_alloc_mb.toFixed(1) + ' MB | Go: ' + d.goroutines;
-    document.getElementById('connBadge').textContent = 'Conntrack: ' + d.conntrack_cur + '/' + d.conntrack_max;
+    var d = await (await api('/api/overview')).json();
+    var v = d.vps || {};
+    document.getElementById('pubIpBadge').textContent = 'IP VPS: ' + d.public_ip;
+    document.getElementById('uptimeBadge').textContent = 'Uptime: ' + fmtUptime(v.vps_uptime_sec);
+    document.getElementById('autoBadge').textContent = d.auto_check_min > 0 ? ('Auto-Check: ' + d.auto_check_min + 'p') : 'Auto-Check: Tắt';
     document.getElementById('credBadge').textContent = 'Auth: ' + d.proxy_user + ':' + d.proxy_pass;
-    document.getElementById('kPorts').textContent = d.proxy_count;
-    document.getElementById('kHealthSub').textContent = 'Alive: ' + d.alive_ports + ' | Dead: ' + d.dead_ports;
-    document.getElementById('kActive').textContent = d.active_conns;
-    document.getElementById('kReqs').textContent = d.total_reqs.toLocaleString();
-    document.getElementById('kSanSub').textContent = 'Sanitized: ' + d.total_sanitized.toLocaleString();
-    document.getElementById('kTraffic').textContent = fmtBytes(d.total_bytes_up) + ' / ' + fmtBytes(d.total_bytes_dn);
-    document.getElementById('kErr').textContent = d.total_errors.toLocaleString();
-    document.getElementById('kLoadSub').textContent = 'Load Avg: ' + (d.load_avg || '-');
 
-    var ts = d.timeseries || [];
-    if (ts.length > 0) {
-      var last = ts[ts.length - 1];
-      document.getElementById('kRpsSub').textContent = last.rps.toFixed(1) + ' req/s';
-      document.getElementById('kSpeedSub').textContent = last.up_kbps.toFixed(1) + ' / ' + last.dn_kbps.toFixed(1) + ' KB/s';
+    var cpu = v.cpu_pct || 0;
+    document.getElementById('vCpuCores').textContent = (v.cpu_cores || 1) + ' Core';
+    document.getElementById('vCpuVal').textContent = cpu.toFixed(1) + '%';
+    document.getElementById('vCpuBar').style.width = Math.min(100, cpu).toFixed(1) + '%';
+    document.getElementById('vCpuBar').style.backgroundColor = meterColor(cpu);
+    document.getElementById('vLoad').textContent = v.load_avg || '-';
+    document.getElementById('vGoCnt').textContent = 'Go: ' + (d.goroutines || 0);
+
+    var mTot = v.mem_total_mb || 1, mUsed = v.mem_used_mb || 0, mPct = (mUsed / mTot) * 100;
+    document.getElementById('vDiskSub').textContent = 'Disk: ' + (v.disk_used_gb || 0).toFixed(1) + '/' + (v.disk_total_gb || 0).toFixed(1) + ' GB';
+    document.getElementById('vRamVal').textContent = (mUsed / 1024).toFixed(2) + ' / ' + (mTot / 1024).toFixed(1) + ' GB';
+    document.getElementById('vRamBar').style.width = Math.min(100, mPct).toFixed(1) + '%';
+    document.getElementById('vRamBar').style.backgroundColor = meterColor(mPct);
+    document.getElementById('vRamPct').textContent = mPct.toFixed(1) + '% RAM';
+    document.getElementById('vFdsSub').textContent = 'FDs: ' + (v.open_fds || 0);
+
+    var pTot = d.proxy_count || 0, pAlive = d.alive_ports || 0, pDead = d.dead_ports || 0;
+    document.getElementById('kActive').textContent = 'LIVE: ' + (d.active_conns || 0);
+    document.getElementById('kPorts').textContent = pTot + ' cổng';
+    document.getElementById('kAliveBar').style.width = (pTot > 0 ? (pAlive / pTot) * 100 : 0).toFixed(1) + '%';
+    document.getElementById('kHealthSub').textContent = 'Sống: ' + pAlive + ' | Chết: ' + pDead;
+    document.getElementById('kSanSub').textContent = 'Đã ẩn: ' + (d.total_sanitized || 0).toLocaleString();
+
+    document.getElementById('vNicVal').textContent = '↑ ' + (v.nic_tx_mbps || 0).toFixed(2) + ' | ↓ ' + (v.nic_rx_mbps || 0).toFixed(2) + ' Mbps';
+    var cCur = v.conntrack_cur || 0, cMax = v.conntrack_max || 1;
+    document.getElementById('vConnSub').textContent = cCur.toLocaleString() + '/' + cMax.toLocaleString();
+    document.getElementById('vConnBar').style.width = Math.min(100, (cCur / cMax) * 100).toFixed(2) + '%';
+    document.getElementById('kReqsSub').textContent = (d.total_reqs || 0).toLocaleString() + ' reqs';
+    document.getElementById('kErrSub').textContent = 'Lỗi: ' + (d.total_errors || 0).toLocaleString();
+
+    var mTx = v.month_tx_bytes || 0, mRx = v.month_rx_bytes || 0, qTB = d.quota_tb || 0, qPct = d.quota_pct || 0;
+    var qBadge = document.getElementById('vQuotaBadge'), qBar = document.getElementById('vQuotaBar');
+    if (qTB > 0) {
+      document.getElementById('vQuotaVal').textContent = fmtBytes(mTx) + ' / ' + qTB + ' TB';
+      qBar.style.width = Math.min(100, qPct).toFixed(1) + '%'; qBar.style.backgroundColor = meterColor(qPct);
+      qBadge.className = qPct >= 95 ? 'pill pill-red' : (qPct >= 75 ? 'pill pill-amber' : 'pill pill-green');
+      qBadge.textContent = (qPct >= 95 ? 'VƯỢT (' : (qPct >= 75 ? 'SẮP ĐẦY (' : 'AN TOÀN (')) + qPct.toFixed(1) + '%)';
+    } else {
+      document.getElementById('vQuotaVal').textContent = fmtBytes(mTx) + ' / Unlimited';
+      qBar.style.width = '100%'; qBar.style.backgroundColor = 'var(--accent)';
+      qBadge.className = 'pill pill-blue'; qBadge.textContent = 'KHÔNG GIỚI HẠN';
     }
-    renderSparkline(ts);
+    document.getElementById('vQuotaProj').textContent = 'Dự báo: ~' + ((v.projected_tx_gb || 0) / 1024).toFixed(2) + ' TB';
+    document.getElementById('vMonthRx').textContent = 'In: ' + fmtBytes(mRx);
 
-    var sc = d.scan || {};
-    var pRow = document.getElementById('scanProgressRow');
-    var stopBtn = document.getElementById('stopScanBtn');
+    var sc = d.scan || {}, pRow = document.getElementById('scanProgressRow');
     if (sc.running) {
       pRow.classList.remove('hidden');
-      stopBtn.classList.remove('hidden');
       var pct = sc.total > 0 ? Math.round((sc.done / sc.total) * 100) : 0;
-      document.getElementById('scanText').textContent = 'Dang quet: ' + sc.done + '/' + sc.total + ' (' + pct + '%) | Alive: ' + sc.alive + ' | Dead: ' + sc.dead;
+      document.getElementById('scanText').textContent = 'Auto-Test: ' + sc.done + '/' + sc.total + ' (' + pct + '%)';
       document.getElementById('scanBar').style.width = pct + '%';
     } else {
       pRow.classList.add('hidden');
-      stopBtn.classList.add('hidden');
     }
   } catch (e) {}
 }
 
 async function loadPorts() {
-  if (currentTab !== 'ports' || isSelectingText()) return;
+  if (currentTab !== 'proxies' || isSelecting()) return;
   try {
     var qs = new URLSearchParams({
-      q: document.getElementById('pq').value,
-      filter: document.getElementById('pfilter').value,
-      sort: document.getElementById('psort').value,
-      page: String(portPage),
-      limit: '50'
+      q: document.getElementById('pq').value, filter: document.getElementById('pfilter').value,
+      sort: document.getElementById('psort').value, page: String(portPage), limit: '50'
     });
-    var r = await api('/api/ports?' + qs.toString());
-    var d = await r.json();
+    var txt = await (await api('/api/ports?' + qs.toString())).text();
+    if (txt === lastPortSig) return;
+    lastPortSig = txt;
+    var d = JSON.parse(txt);
     portTotal = d.total || 0;
-    document.getElementById('portPagerInfo').textContent = 'Hien thi ' + (d.rows ? d.rows.length : 0) + ' / ' + portTotal + ' cong';
+    document.getElementById('portPagerInfo').textContent = 'Hiển thị ' + (d.rows ? d.rows.length : 0) + ' / ' + portTotal + ' cổng';
     document.getElementById('portPageNum').textContent = 'Trang ' + portPage;
     var html = '';
     (d.rows || []).forEach(function(p) {
-      var hBadge = '<span class="badge bg-amber">Chua test</span>';
-      if (p.health === 'alive') hBadge = '<span class="badge bg-green">ALIVE</span>';
-      else if (p.health === 'dead') hBadge = '<span class="badge bg-red">DEAD</span>';
+      var hb = '<span class="pill pill-amber" style="padding:2px 8px">Chờ test</span>';
+      if (p.health === 'alive') hb = '<span class="pill pill-green" style="padding:2px 8px">LIVE</span>';
+      else if (p.health === 'dead') hb = '<span class="pill pill-red" style="padding:2px 8px">DIE</span>';
       html += '<tr>' +
         '<td class="mono"><b>:' + p.port + '</b></td>' +
         '<td class="mono">' + esc(p.upstream) + '</td>' +
-        '<td>' + esc(p.proto.toUpperCase()) + '</td>' +
-        '<td>' + hBadge + '</td>' +
+        '<td><span class="pill pill-blue" style="padding:2px 8px">' + esc(p.proto.toUpperCase()) + '</span></td>' +
+        '<td>' + hb + '</td>' +
         '<td class="mono">' + (p.latency_ms ? p.latency_ms + 'ms' : '-') + '</td>' +
         '<td class="mono" style="color:var(--accent)">' + esc(p.exit_ip || '-') + '</td>' +
         '<td class="mono">' + p.active_conns + '</td>' +
@@ -497,146 +492,92 @@ async function loadPorts() {
         '<td class="mono" style="color:var(--green)">' + p.sanitized_reqs + '</td>' +
         '<td class="mono" style="color:var(--red)">' + p.error_reqs + '</td>' +
         '<td class="mono">' + fmtBytes(p.bytes_up) + ' / ' + fmtBytes(p.bytes_down) + '</td>' +
-        '<td style="color:var(--red);max-width:220px;overflow:hidden;text-overflow:ellipsis">' + esc(p.last_err) + '</td>' +
+        '<td style="color:var(--red);max-width:200px;overflow:hidden;text-overflow:ellipsis">' + esc(p.last_err) + '</td>' +
         '<td><button class="btn btn-sec btn-sm" onclick="testOnePort(' + p.port + ')">Test</button></td>' +
         '</tr>';
     });
-    document.getElementById('portBody').innerHTML = html || '<tr><td colspan="13" style="text-align:center;color:var(--muted)">Khong co du lieu phu hop.</td></tr>';
+    document.getElementById('portBody').innerHTML = html || '<tr><td colspan="13" style="text-align:center;color:var(--muted);padding:20px">Chưa có proxy nào. Hãy dán proxy vào ô phía trên và bấm Lưu!</td></tr>';
   } catch (e) {}
 }
 
 async function testOnePort(port) {
-  toast('Dang kiem tra cong :' + port + '...');
-  var r = await api('/api/ports/test', {
+  toast('Đang kiểm tra cổng :' + port + '...');
+  var d = await (await api('/api/ports/test', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({port: port, mode: 'deep'})
-  });
-  var d = await r.json();
-  if (d.health === 'alive') {
-    toast('Cong :' + port + ' ALIVE (' + d.latency_ms + 'ms) - Exit IP: ' + (d.exit_ip || 'OK'));
-  } else {
-    toast('Cong :' + port + ' DEAD: ' + (d.error || 'Timeout'));
-  }
-  loadPorts();
-  loadOverview();
+  })).json();
+  toast(d.health === 'alive' ? ('Cổng :' + port + ' LIVE (' + d.latency_ms + 'ms) — Exit IP: ' + (d.exit_ip || 'OK')) : ('Cổng :' + port + ' DIE: ' + (d.error || 'Timeout')));
+  lastPortSig = ''; loadPorts(); loadOverview(); refreshOutputBox();
 }
 
 async function loadRequests() {
-  if (currentTab !== 'requests' || isSelectingText()) return;
+  if (currentTab !== 'requests' || isSelecting()) return;
   try {
     var qs = new URLSearchParams({
-      q: document.getElementById('fq').value,
-      action: document.getElementById('fact').value,
-      proto: document.getElementById('fproto').value,
-      port: document.getElementById('fport').value,
-      limit: '120'
+      q: document.getElementById('fq').value, action: document.getElementById('fact').value,
+      port: document.getElementById('fport').value, limit: '120'
     });
-    var r = await api('/api/requests?' + qs.toString());
-    var d = await r.json();
+    var txt = await (await api('/api/requests?' + qs.toString())).text();
+    if (txt === lastReqSig) return;
+    lastReqSig = txt;
+    var d = JSON.parse(txt);
     var html = '';
     (d.rows || []).forEach(function(row) {
-      var modeBadge = row.sanitized
-        ? '<span class="badge bg-green">SANITIZED</span>'
-        : '<span class="badge bg-blue">DIRECT</span>';
-      var stBadge = '<span class="badge bg-green">OK</span>';
-      if (row.status === 'LIVE') stBadge = '<span class="badge bg-amber">LIVE</span>';
-      else if (row.status === 'ERR') stBadge = '<span class="badge bg-red">ERR: ' + esc(row.error) + '</span>';
+      var mb = row.sanitized ? '<span class="pill pill-green" style="padding:2px 8px">ĐÃ ẨN (IP)</span>' : '<span class="pill pill-blue" style="padding:2px 8px">GIỮ NGUYÊN</span>';
+      var sb = '<span class="pill pill-green" style="padding:2px 8px">OK</span>';
+      if (row.status === 'LIVE') sb = '<span class="pill pill-amber" style="padding:2px 8px">LIVE</span>';
+      else if (row.status === 'ERR') sb = '<span class="pill pill-red" style="padding:2px 8px">ERR: ' + esc(row.error) + '</span>';
+      var domOnly = row.orig_target.split(':')[0];
+      var hideBtn = row.sanitized ? '<span style="color:var(--muted);font-size:12px">Đã ẩn</span>' : '<button class="btn btn-green btn-sm" onclick="quickSanitize(\'' + esc(domOnly) + '\')">+ Ẩn Domain</button>';
       html += '<tr>' +
         '<td class="mono" style="color:var(--muted)">' + esc(row.time) + '</td>' +
         '<td class="mono"><b>:' + row.port + '</b></td>' +
         '<td class="mono">' + esc(row.client_ip) + '</td>' +
         '<td class="mono">' + esc(row.orig_target) + '</td>' +
         '<td class="mono" style="color:' + (row.sanitized ? 'var(--green)' : 'var(--text)') + '">' + esc(row.sent_target) + '</td>' +
-        '<td>' + modeBadge + '</td>' +
-        '<td class="mono">' + esc(row.upstream) + '</td>' +
+        '<td>' + mb + '</td>' +
         '<td>' + esc(row.protocol) + '</td>' +
-        '<td class="mono">' + (row.status === 'LIVE' ? 'streaming...' : fmtBytes(row.bytes_up) + ' / ' + fmtBytes(row.bytes_down)) + '</td>' +
+        '<td class="mono">' + (row.status === 'LIVE' ? 'đang truyền...' : fmtBytes(row.bytes_up) + ' / ' + fmtBytes(row.bytes_down)) + '</td>' +
         '<td class="mono">' + (row.duration_ms < 1000 ? row.duration_ms + 'ms' : (row.duration_ms / 1000).toFixed(2) + 's') + '</td>' +
-        '<td>' + stBadge + '</td>' +
+        '<td>' + sb + '</td>' +
+        '<td>' + hideBtn + '</td>' +
         '</tr>';
     });
-    document.getElementById('reqBody').innerHTML = html || '<tr><td colspan="11" style="text-align:center;color:var(--muted)">Chua co request nao.</td></tr>';
-  } catch (e) {}
-}
-
-async function loadDomains() {
-  if (currentTab !== 'domains' || isSelectingText()) return;
-  try {
-    var qs = new URLSearchParams({
-      q: document.getElementById('dq').value,
-      filter: document.getElementById('dfilter').value
-    });
-    var r = await api('/api/domains?' + qs.toString());
-    var d = await r.json();
-    var html = '';
-    (d.rows || []).forEach(function(row) {
-      var st = row.is_targeted
-        ? '<span class="badge bg-green">DANG TAY TRANG</span>'
-        : '<span class="badge bg-blue">DIRECT</span>';
-      var btn = row.is_targeted
-        ? '<span style="color:var(--muted);font-size:11px">Da bao ve</span>'
-        : '<button class="btn btn-green btn-sm" onclick="quickSanitize(\'' + esc(row.domain) + '\')">+ Tay trang</button>';
-      html += '<tr>' +
-        '<td class="mono"><b>' + esc(row.domain) + '</b></td>' +
-        '<td>' + st + '</td>' +
-        '<td class="mono" style="color:var(--accent)">' + esc(row.resolved_ip || '-') + '</td>' +
-        '<td class="mono">' + row.hits + '</td>' +
-        '<td class="mono" style="color:var(--green)">' + row.sanitized + '</td>' +
-        '<td class="mono" style="color:var(--red)">' + row.errors + '</td>' +
-        '<td class="mono">' + fmtBytes(row.bytes) + '</td>' +
-        '<td class="mono" style="color:var(--muted)">' + esc(row.last_seen) + '</td>' +
-        '<td>' + btn + '</td>' +
-        '</tr>';
-    });
-    document.getElementById('domBody').innerHTML = html || '<tr><td colspan="9" style="text-align:center;color:var(--muted)">Chua co du lieu domain.</td></tr>';
+    document.getElementById('reqBody').innerHTML = html || '<tr><td colspan="11" style="text-align:center;color:var(--muted);padding:20px">Chưa có request nào.</td></tr>';
   } catch (e) {}
 }
 
 async function quickSanitize(domain) {
+  if (!domain || /^\d+\.\d+\.\d+\.\d+$/.test(domain)) { toast('Đây đã là IP thuần rồi!'); return; }
   var parts = domain.split('.');
   var kw = parts.length >= 2 ? parts.slice(-2).join('.') : domain;
-  await api('/api/domains/sanitize', {
-    method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({keyword: kw})
-  });
-  toast('Da them "' + kw + '" vao bo loc tay trang DoH!');
-  loadDomains();
-  loadConfig();
+  await api('/api/domains/sanitize', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({keyword: kw})});
+  toast('Đã thêm "' + kw + '" vào danh sách tự động ẩn!');
+  lastReqSig = ''; loadRequests();
 }
 
 function analyzeInputBox() {
-  var raw = document.getElementById('proxiesBox').value;
-  var lines = raw.split(/\r?\n/);
-  var valid = 0;
-  lines.forEach(function(l) {
-    l = l.trim();
-    if (!l || l.charAt(0) === '#') return;
-    if (l.indexOf(':') !== -1) valid++;
-  });
-  document.getElementById('inCountBadge').textContent = valid + ' dong hop le';
+  var lines = document.getElementById('proxiesBox').value.split(/\r?\n/), valid = 0;
+  lines.forEach(function(l) { l = l.trim(); if (l && l.charAt(0) !== '#' && /:\d{1,5}/.test(l)) valid++; });
+  document.getElementById('inCountBadge').textContent = valid + ' hợp lệ';
 }
-
 function uploadProxyFile(ev) {
-  var f = ev.target.files[0];
-  if (!f) return;
+  var f = ev.target.files[0]; if (!f) return;
   var rd = new FileReader();
-  rd.onload = function(e) {
-    document.getElementById('proxiesBox').value = e.target.result || '';
-    analyzeInputBox();
-    toast('Da nap file ' + f.name + '. Bam "Luu & Boc Proxy Ngay" de ap dung!');
-  };
+  rd.onload = function(e) { document.getElementById('proxiesBox').value = e.target.result || ''; analyzeInputBox(); toast('Đã nạp ' + f.name + '. Bấm "Lưu, Bọc & Tự Test Ngay"!'); };
   rd.readAsText(f);
 }
 
 async function loadConfig() {
   try {
-    var r = await api('/api/config');
-    var c = await r.json();
+    var c = await (await api('/api/config')).json();
     document.getElementById('proxiesBox').value = c.proxies_raw || '';
-    document.getElementById('defUpProto').value = c.default_up_proto || 'socks5';
+    document.getElementById('defUpProto').value = c.default_up_proto || 'http';
     document.getElementById('sProxyUser').value = c.proxy_user || '';
     document.getElementById('sProxyPass').value = c.proxy_pass || '';
     document.getElementById('sStartPort').value = c.start_port || 10001;
+    document.getElementById('sAutoCheck').value = (c.auto_check_min !== undefined ? c.auto_check_min : 5);
+    document.getElementById('sQuotaTB').value = (c.bandwidth_quota_tb !== undefined ? c.bandwidth_quota_tb : 10);
     document.getElementById('sKeywords').value = c.sanitize_keywords || '';
     document.getElementById('sAdminUser').value = c.admin_user || 'admin';
     document.getElementById('sAdminPass').value = '';
@@ -644,75 +585,42 @@ async function loadConfig() {
   } catch (e) {}
 }
 
-function getExportTemplate() {
-  var p = document.getElementById('expPreset').value;
-  if (p === 'custom') return document.getElementById('customTmpl').value;
-  return p;
-}
-
-function onPresetChange() {
-  var p = document.getElementById('expPreset').value;
-  document.getElementById('customTmplRow').classList.toggle('hidden', p !== 'custom');
-  refreshOutputStudio();
-}
-
-async function refreshOutputStudio() {
+async function refreshOutputBox() {
   try {
-    var tmpl = getExportTemplate();
-    var filter = document.getElementById('expFilter').value;
-    var qs = new URLSearchParams({tmpl: tmpl, filter: filter});
-    var r = await api('/api/export?' + qs.toString());
-    var txt = await r.text();
+    var txt = await (await api('/api/export?filter=' + encodeURIComponent(document.getElementById('expFilter').value))).text();
     document.getElementById('outputBox').value = txt;
     var cnt = txt.trim() === '' ? 0 : txt.trim().split('\n').length;
-    document.getElementById('outCountBadge').textContent = cnt + ' cong san sang';
+    document.getElementById('outCountBadge').textContent = cnt + ' sẵn sàng';
   } catch (e) {}
 }
-
 async function copyOutputBox() {
   var txt = document.getElementById('outputBox').value.trim();
-  if (!txt) { toast('Chua co proxy nao de copy!'); return; }
-  await copyTextSafe(txt);
-  toast('Da copy ' + txt.split('\n').length + ' proxy vao Clipboard!');
+  if (!txt) { toast('Chưa có proxy nào để copy!'); return; }
+  await copyTextSafe(txt); toast('Đã copy ' + txt.split('\n').length + ' proxy vào Clipboard!');
 }
-
 function downloadOutputBox() {
-  var qs = new URLSearchParams({
-    tmpl: getExportTemplate(),
-    filter: document.getElementById('expFilter').value,
-    dl: '1'
-  });
-  window.location = '/api/export?' + qs.toString();
+  window.location = '/api/export?filter=' + encodeURIComponent(document.getElementById('expFilter').value) + '&dl=1';
 }
 
 async function saveProxies() {
-  var r = await api('/api/proxies/save', {
+  var d = await (await api('/api/proxies/save', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({
       proxies_raw: document.getElementById('proxiesBox').value,
       default_up_proto: document.getElementById('defUpProto').value,
       dedup: document.getElementById('chkDedup').checked
     })
-  });
-  var d = await r.json();
-  if (d.cleaned_raw !== undefined) {
-    document.getElementById('proxiesBox').value = d.cleaned_raw;
-    analyzeInputBox();
-  }
-  toast('Da boc ' + d.active_ports + ' cong! (Loc trung: ' + (d.dupes||0) + ', Loi cu phap: ' + (d.invalid||0) + ')');
-  loadOverview();
-  refreshOutputStudio();
+  })).json();
+  if (d.cleaned_raw !== undefined) { document.getElementById('proxiesBox').value = d.cleaned_raw; analyzeInputBox(); }
+  toast('Đã bọc ' + d.active_ports + ' cổng & đang tự động test LIVE!');
+  lastPortSig = ''; loadOverview(); loadPorts(); refreshOutputBox();
 }
 
 async function removeDead() {
-  var r = await api('/api/proxies/remove-dead', {method: 'POST'});
-  var d = await r.json();
-  document.getElementById('proxiesBox').value = d.cleaned_raw || '';
-  analyzeInputBox();
-  toast('Da xoa ' + d.removed + ' cong DEAD! Con lai ' + d.active_ports + ' cong.');
-  loadOverview();
-  loadPorts();
-  refreshOutputStudio();
+  var d = await (await api('/api/proxies/remove-dead', {method: 'POST'})).json();
+  document.getElementById('proxiesBox').value = d.cleaned_raw || ''; analyzeInputBox();
+  toast('Đã xóa ' + d.removed + ' proxy DIE! Còn ' + d.active_ports + ' cổng.');
+  lastPortSig = ''; loadOverview(); loadPorts(); refreshOutputBox();
 }
 
 async function saveSettings() {
@@ -722,52 +630,44 @@ async function saveSettings() {
       proxy_user: document.getElementById('sProxyUser').value,
       proxy_pass: document.getElementById('sProxyPass').value,
       start_port: parseInt(document.getElementById('sStartPort').value, 10),
+      auto_check_min: parseInt(document.getElementById('sAutoCheck').value, 10) || 0,
+      bandwidth_quota_tb: parseFloat(document.getElementById('sQuotaTB').value) || 0,
       sanitize_keywords: document.getElementById('sKeywords').value,
       new_admin_user: document.getElementById('sAdminUser').value,
       new_admin_pass: document.getElementById('sAdminPass').value
     })
   });
   var d = await r.json();
-  if (!r.ok) { toast(d.error || 'Loi luu cau hinh'); return; }
-  toast('Da luu & cap nhat ' + d.active_ports + ' cong!');
-  loadOverview();
-  refreshOutputStudio();
+  if (!r.ok) { toast(d.error || 'Lỗi lưu cài đặt'); return; }
+  toast('Đã lưu toàn bộ cài đặt & đồng bộ ' + d.active_ports + ' cổng!');
+  loadOverview(); refreshOutputBox();
+}
+
+function restoreBackup(ev) {
+  var f = ev.target.files[0]; if (!f) return;
+  var rd = new FileReader();
+  rd.onload = async function(e) {
+    var r = await api('/api/restore', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: e.target.result});
+    var d = await r.json();
+    if (!r.ok) { toast(d.error || 'Lỗi khôi phục backup'); return; }
+    toast('Đã khôi phục thành công ' + d.active_ports + ' cổng proxy!');
+    loadConfig(); loadOverview(); refreshOutputBox();
+  };
+  rd.readAsText(f);
 }
 
 async function startScan(mode) {
-  await api('/api/scan/start', {
-    method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({mode: mode})
-  });
-  toast('Bat dau quet ' + (mode === 'deep' ? 'Sau + Check Exit IP' : 'Nhanh') + '...');
+  await api('/api/scan/start', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({mode: mode})});
+  toast('Đang tự động kiểm tra toàn bộ proxy bằng IP của VPS...');
   loadOverview();
 }
-
-async function stopScan() {
-  await api('/api/scan/stop', {method: 'POST'});
-  toast('Dang dung quet...');
-}
-
+async function stopScan() { await api('/api/scan/stop', {method: 'POST'}); toast('Đã dừng kiểm tra.'); }
 function exportCSV() {
-  var qs = new URLSearchParams({
-    q: document.getElementById('fq').value,
-    action: document.getElementById('fact').value,
-    proto: document.getElementById('fproto').value,
-    port: document.getElementById('fport').value
-  });
+  var qs = new URLSearchParams({q: document.getElementById('fq').value, action: document.getElementById('fact').value, port: document.getElementById('fport').value});
   window.location = '/api/requests/csv?' + qs.toString();
 }
-
-async function clearLogs() {
-  await api('/api/requests/clear', {method: 'POST'});
-  loadRequests();
-  toast('Da xoa lich su request!');
-}
-
-function togglePause() {
-  paused = !paused;
-  document.getElementById('pauseBtn').textContent = paused ? 'Tam dung' : 'Auto-Refresh: 2s';
-}
+async function clearLogs() { await api('/api/requests/clear', {method: 'POST'}); lastReqSig = ''; loadRequests(); toast('Đã xóa lịch sử!'); }
+function togglePause() { paused = !paused; document.getElementById('pauseBtn').textContent = paused ? 'Đang tạm dừng' : 'Tự động: 2s'; }
 
 async function initApp() {
   try {
@@ -775,16 +675,16 @@ async function initApp() {
     document.getElementById('loginView').classList.add('hidden');
     document.getElementById('appView').classList.remove('hidden');
     await loadConfig();
-    await refreshOutputStudio();
+    await loadPorts();
+    await refreshOutputBox();
   } catch (e) {}
 }
 
 setInterval(function() {
-  if (!paused && !document.getElementById('appView').classList.contains('hidden')) {
+  if (!document.hidden && !paused && !document.getElementById('appView').classList.contains('hidden')) {
     loadOverview();
-    if (currentTab === 'requests') loadRequests();
-    if (currentTab === 'ports') loadPorts();
-    if (currentTab === 'domains') loadDomains();
+    if (currentTab === 'proxies') { loadPorts(); }
+    if (currentTab === 'requests') { loadRequests(); }
   }
 }, 2000);
 
