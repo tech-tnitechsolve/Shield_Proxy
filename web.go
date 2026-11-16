@@ -974,7 +974,7 @@ func apiAddOrReplaceProxies(w http.ResponseWriter, r *http.Request) {
 		DefaultUpProto string `json:"default_up_proto"`
 		Group          string `json:"group"`
 		Note           string `json:"note"`
-		Mode           string `json:"mode"` // "append" or "replace"
+		Mode           string `json:"mode"`
 		Dedup          bool   `json:"dedup"`
 	}
 	if json.NewDecoder(r.Body).Decode(&body) != nil {
@@ -1057,6 +1057,7 @@ func apiAddOrReplaceProxies(w http.ResponseWriter, r *http.Request) {
 		"status":       "ok",
 		"active_ports": cnt,
 		"added":        len(addedPorts),
+		"added_ports":  addedPorts,
 		"dup_batch":    len(prev.DupBatch),
 		"dup_existing": len(prev.DupExisting),
 		"invalid":      len(prev.InvalidLines),
@@ -1073,7 +1074,7 @@ func apiProxyEntryAction(w http.ResponseWriter, r *http.Request) {
 	}
 	var body struct {
 		Port         int    `json:"port"`
-		Action       string `json:"action"` // "toggle", "edit", "delete", "regen_auth"
+		Action       string `json:"action"`
 		UpstreamLine string `json:"upstream_line"`
 		Group        string `json:"group"`
 		Note         string `json:"note"`
@@ -1164,7 +1165,7 @@ func apiProxyBulkAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Action string `json:"action"` // "enable", "disable", "delete_dead", "delete_selected", "set_group", "reindex", "regen_auth"
+		Action string `json:"action"`
 		Ports  []int  `json:"ports"`
 		Group  string `json:"group"`
 	}
@@ -1337,15 +1338,25 @@ func apiSaveSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// Da dang Option xuat dau ra: match 1:1, user:pass@ip:port, ip:port:user:pass, ip:port, csv, json, custom
 func apiExportWrapped(w http.ResponseWriter, r *http.Request) {
 	filter := r.URL.Query().Get("filter")
 	groupFilter := r.URL.Query().Get("group")
-	protoFilter := r.URL.Query().Get("proto") // ALL, http, socks5
-	format := r.URL.Query().Get("format")     // match, userpass_ipport, ipport_userpass, ipport, csv, json, custom
+	protoFilter := r.URL.Query().Get("proto")
+	format := r.URL.Query().Get("format")
 	tmpl := r.URL.Query().Get("tmpl")
 	if format == "" {
 		format = "match"
+	}
+
+	portsParam := strings.TrimSpace(r.URL.Query().Get("ports"))
+	var portWhitelist map[int]bool
+	if portsParam != "" {
+		portWhitelist = make(map[int]bool)
+		for _, ps := range strings.Split(portsParam, ",") {
+			if pn, err := strconv.Atoi(strings.TrimSpace(ps)); err == nil && pn > 0 {
+				portWhitelist[pn] = true
+			}
+		}
 	}
 
 	cfgMu.RLock()
@@ -1371,6 +1382,9 @@ func apiExportWrapped(w http.ResponseWriter, r *http.Request) {
 	runnersMu.RLock()
 	for _, ent := range entries {
 		if !ent.Enabled {
+			continue
+		}
+		if portWhitelist != nil && !portWhitelist[ent.Port] {
 			continue
 		}
 		grp := ent.Group
@@ -1442,6 +1456,10 @@ func apiExportWrapped(w http.ResponseWriter, r *http.Request) {
 	var lines []string
 	for _, row := range rows {
 		switch format {
+		case "force_http":
+			lines = append(lines, fmt.Sprintf("http://%s:%s@%s:%d", row.User, row.Pass, row.IP, row.Port))
+		case "force_socks5":
+			lines = append(lines, fmt.Sprintf("socks5://%s:%s@%s:%d", row.User, row.Pass, row.IP, row.Port))
 		case "userpass_ipport":
 			lines = append(lines, fmt.Sprintf("%s:%s@%s:%d", row.User, row.Pass, row.IP, row.Port))
 		case "ipport_userpass":
@@ -1462,7 +1480,7 @@ func apiExportWrapped(w http.ResponseWriter, r *http.Request) {
 			s = strings.ReplaceAll(s, "{upstream}", row.Upstream)
 			s = strings.ReplaceAll(s, "{exit_ip}", row.ExitIP)
 			lines = append(lines, s)
-		default: // "match" 1:1 protocol
+		default:
 			lines = append(lines, row.URL)
 		}
 	}
