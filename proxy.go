@@ -41,17 +41,19 @@ type PortRunner struct {
 	LastOKUnix    int64
 	LastErrUnix   int64
 
-	Port     int
-	mu       sync.RWMutex
-	upstream Upstream
-	group    string
-	note     string
-	lastErr  string
-	health   string // "untested", "alive", "dead"
-	latency  int64
-	exitIP   string
-	ln       net.Listener
-	closed   int32
+	Port      int
+	mu        sync.RWMutex
+	upstream  Upstream
+	group     string
+	note      string
+	proxyUser string
+	proxyPass string
+	lastErr   string
+	health    string // "untested", "alive", "dead"
+	latency   int64
+	exitIP    string
+	ln        net.Listener
+	closed    int32
 }
 
 func (pr *PortRunner) GetUpstream() Upstream {
@@ -60,11 +62,23 @@ func (pr *PortRunner) GetUpstream() Upstream {
 	return pr.upstream
 }
 
-func (pr *PortRunner) SetMeta(u Upstream, group, note string) {
+func (pr *PortRunner) GetClientCreds() ([]byte, []byte) {
+	pr.mu.RLock()
+	u, p := pr.proxyUser, pr.proxyPass
+	pr.mu.RUnlock()
+	if u != "" && p != "" {
+		return []byte(u), []byte(p)
+	}
+	return getProxyCreds()
+}
+
+func (pr *PortRunner) SetMeta(u Upstream, group, note, pUser, pPass string) {
 	pr.mu.Lock()
 	pr.upstream = u
 	pr.group = group
 	pr.note = note
+	pr.proxyUser = pUser
+	pr.proxyPass = pPass
 	pr.mu.Unlock()
 }
 
@@ -109,8 +123,30 @@ type RequestRecord struct {
 	ErrorMsg   string `json:"error"`
 }
 
+type countWriter struct {
+	w io.Writer
+	n int64
+}
+
+func (cw *countWriter) Write(p []byte) (int, error) {
+	n, err := cw.w.Write(p)
+	cw.n += int64(n)
+	return n, err
+}
+
+type countReader struct {
+	r io.Reader
+	n int64
+}
+
+func (cr *countReader) Read(p []byte) (int, error) {
+	n, err := cr.r.Read(p)
+	cr.n += int64(n)
+	return n, err
+}
+
 var bufReaderPool = sync.Pool{
-	New: func() interface{} { return bufio.NewReaderSize(nil, 8192) },
+	New: func() interface{} { return bufio.NewReaderSize(nil, 16384) },
 }
 
 func tuneTCP(c net.Conn) {
@@ -133,12 +169,12 @@ func tuneTCP(c net.Conn) {
 			_ = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_TCP, optTCPKeepIdle, 30)
 			_ = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_TCP, optTCPKeepIntvl, 10)
 			_ = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_TCP, optTCPKeepCnt, 3)
-			_ = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_TCP, optTCPUserTimeout, 30000)
+			_ = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_TCP, optTCPUserTimeout, 45000)
 		})
 	}
 }
 
-func relayTCP(clientConn, upConn net.Conn, clientBuf *bufio.Reader, isTunnel bool) (int64, int64) {
+func relayTCP(clientConn, upConn net.Conn, clientBuf *bufio.Reader) (int64, int64) {
 	cTCP, ok1 := clientConn.(*net.TCPConn)
 	uTCP, ok2 := upConn.(*net.TCPConn)
 	if !ok1 || !ok2 {
@@ -178,25 +214,21 @@ func relayTCP(clientConn, upConn net.Conn, clientBuf *bufio.Reader, isTunnel boo
 	}()
 
 	<-done
-	grace := 5 * time.Second
-	if !isTunnel {
-		grace = 1500 * time.Millisecond
-	}
-	_ = cTCP.SetDeadline(time.Now().Add(grace))
-	_ = uTCP.SetDeadline(time.Now().Add(grace))
+	_ = cTCP.SetDeadline(time.Now().Add(5 * time.Second))
+	_ = uTCP.SetDeadline(time.Now().Add(5 * time.Second))
 	<-done
 
 	return atomic.LoadInt64(&bUp), atomic.LoadInt64(&bDown)
 }
 
 func dialUpstreamCtx(ctx context.Context, up Upstream, targetHost string, targetPort uint16) (net.Conn, error) {
-	dialer := &net.Dialer{Timeout: 8 * time.Second}
+	dialer := &net.Dialer{Timeout: 15 * time.Second}
 	conn, err := dialer.DialContext(ctx, "tcp4", up.Addr())
 	if err != nil {
 		return nil, err
 	}
 	tuneTCP(conn)
-	_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
+	_ = conn.SetDeadline(time.Now().Add(20 * time.Second))
 
 	if dl, ok := ctx.Deadline(); ok {
 		_ = conn.SetDeadline(dl)
@@ -328,7 +360,7 @@ func dialUpstreamCtx(ctx context.Context, up Upstream, targetHost string, target
 func handleClient(clientConn net.Conn, pr *PortRunner) {
 	defer clientConn.Close()
 	tuneTCP(clientConn)
-	_ = clientConn.SetDeadline(time.Now().Add(12 * time.Second))
+	_ = clientConn.SetDeadline(time.Now().Add(20 * time.Second))
 
 	atomic.AddInt64(&pr.ActiveConns, 1)
 	defer atomic.AddInt64(&pr.ActiveConns, -1)
@@ -346,13 +378,13 @@ func handleClient(clientConn net.Conn, pr *PortRunner) {
 		return
 	}
 
-	localUser, localPass := getProxyCreds()
 	up := pr.GetUpstream()
 
 	if first[0] == 0x05 {
+		localUser, localPass := pr.GetClientCreds()
 		handleSOCKS5(clientConn, br, pr, up, clientIP, localUser, localPass)
 	} else {
-		handleHTTP(clientConn, br, pr, up, clientIP, localUser, localPass)
+		handleHTTP(clientConn, br, pr, up, clientIP)
 	}
 }
 
@@ -400,7 +432,7 @@ func handleSOCKS5(clientConn net.Conn, br *bufio.Reader, pr *PortRunner, up Upst
 
 	if subtle.ConstantTimeCompare(uname, localUser) != 1 || subtle.ConstantTimeCompare(passwd, localPass) != 1 {
 		_, _ = clientConn.Write([]byte{0x01, 0x01})
-		pr.SetError("client wrong password")
+		pr.SetError("wrong pass: " + clientIP)
 		return
 	}
 	if _, err := clientConn.Write([]byte{0x01, 0x00}); err != nil {
@@ -435,7 +467,7 @@ func handleSOCKS5(clientConn net.Conn, br *bufio.Reader, pr *PortRunner, up Upst
 		}
 		origHost = string(db)
 	default:
-		_, _ = clientConn.Write([]byte{0x05, 0x08, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
+		_, _ = clientConn.Write([]byte{0x05, 0x04, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
 		atomic.AddInt64(&pr.BlockedReqs, 1)
 		rec := newReqRecord(pr.Port, clientIP, "IPv6", "-", up.Addr(), "SOCKS5", false)
 		finishReq(rec, "IPv6", "-", 0, 0, "BLK", "IPv6 blocked")
@@ -459,7 +491,11 @@ func handleSOCKS5(clientConn net.Conn, br *bufio.Reader, pr *PortRunner, up Upst
 	}
 
 	if blocked, reason := isBlockedRequest(origHost, targetPort); blocked {
-		_, _ = clientConn.Write([]byte{0x05, 0x02, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
+		replyCode := byte(0x02)
+		if strings.HasPrefix(strings.ToLower(origHost), "ipv6.") {
+			replyCode = 0x04
+		}
+		_, _ = clientConn.Write([]byte{0x05, replyCode, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
 		atomic.AddInt64(&pr.BlockedReqs, 1)
 		rec := newReqRecord(pr.Port, clientIP, net.JoinHostPort(origHost, portStr), "-", up.Addr(), "SOCKS5", false)
 		finishReq(rec, origHost, "-", 0, 0, "BLK", reason)
@@ -473,7 +509,7 @@ func handleSOCKS5(clientConn net.Conn, br *bufio.Reader, pr *PortRunner, up Upst
 	if needsSanitize(origHost) {
 		ipStr, err := resolveDoH(origHost)
 		if err != nil || ipStr == "" {
-			_, _ = clientConn.Write([]byte{0x05, 0x01, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
+			_, _ = clientConn.Write([]byte{0x05, 0x04, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
 			atomic.AddInt64(&pr.BlockedReqs, 1)
 			rec := newReqRecord(pr.Port, clientIP, net.JoinHostPort(origHost, portStr), "-", up.Addr(), "SOCKS5", false)
 			finishReq(rec, origHost, "-", 0, 0, "BLK", "anti-leak: doh failed")
@@ -497,7 +533,7 @@ func handleSOCKS5(clientConn net.Conn, br *bufio.Reader, pr *PortRunner, up Upst
 	)
 	addActiveReq(rec)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	upConn, err := dialUpstreamCtx(ctx, up, sentHost, targetPort)
 	cancel()
 	if err != nil {
@@ -514,7 +550,7 @@ func handleSOCKS5(clientConn net.Conn, br *bufio.Reader, pr *PortRunner, up Upst
 	}
 
 	_ = clientConn.SetDeadline(time.Time{})
-	bUp, bDown := relayTCP(clientConn, upConn, br, true)
+	bUp, bDown := relayTCP(clientConn, upConn, br)
 	atomic.AddInt64(&pr.BytesUp, bUp)
 	atomic.AddInt64(&pr.BytesDown, bDown)
 	atomic.StoreInt64(&pr.LastOKUnix, time.Now().Unix())
@@ -538,162 +574,221 @@ func checkHTTPAuth(req *http.Request, localUser, localPass []byte) bool {
 		subtle.ConstantTimeCompare([]byte(parts[1]), localPass) == 1
 }
 
-func handleHTTP(clientConn net.Conn, br *bufio.Reader, pr *PortRunner, up Upstream, clientIP string, localUser, localPass []byte) {
-	req, err := http.ReadRequest(br)
-	if err != nil {
-		return
-	}
-	defer req.Body.Close()
-
-	if !checkHTTPAuth(req, localUser, localPass) {
-		_, _ = clientConn.Write([]byte("HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"Proxy\"\r\nConnection: close\r\n\r\n"))
-		if req.Header.Get("Proxy-Authorization") != "" {
-			pr.SetError("client wrong password")
-		}
-		return
-	}
-
-	rawHost := req.Host
-	if rawHost == "" && req.URL != nil {
-		rawHost = req.URL.Host
-	}
-	origHost, portStr, err := net.SplitHostPort(rawHost)
-	if err != nil {
-		origHost = rawHost
-		if req.Method == http.MethodConnect {
-			portStr = "443"
-		} else {
-			portStr = "80"
-		}
-	}
-	origHost = strings.TrimSuffix(strings.TrimSpace(origHost), ".")
-	portNum, err := strconv.Atoi(portStr)
-	if err != nil || portNum < 1 || portNum > 65535 {
-		_, _ = clientConn.Write([]byte("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n"))
-		return
-	}
-
-	protoLabel := "HTTP-CONNECT"
-	isTunnel := true
-	if req.Method != http.MethodConnect {
-		protoLabel = "HTTP-" + req.Method
-		isTunnel = false
-	}
-
-	if isPrivateOrReserved(origHost) {
-		_, _ = clientConn.Write([]byte("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n"))
-		atomic.AddInt64(&pr.BlockedReqs, 1)
-		rec := newReqRecord(pr.Port, clientIP, net.JoinHostPort(origHost, portStr), "-", up.Addr(), protoLabel, false)
-		finishReq(rec, origHost, "-", 0, 0, "BLK", "private/ipv6 blocked")
-		return
-	}
-
-	if blocked, reason := isBlockedRequest(origHost, uint16(portNum)); blocked {
-		_, _ = clientConn.Write([]byte("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n"))
-		atomic.AddInt64(&pr.BlockedReqs, 1)
-		rec := newReqRecord(pr.Port, clientIP, net.JoinHostPort(origHost, portStr), "-", up.Addr(), protoLabel, false)
-		finishReq(rec, origHost, "-", 0, 0, "BLK", reason)
-		return
-	}
-
-	atomic.AddInt64(&pr.TotalReqs, 1)
-	sentHost := origHost
-	sanitized := false
-	if needsSanitize(origHost) {
-		ipStr, err := resolveDoH(origHost)
-		if err != nil || ipStr == "" {
-			_, _ = clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n"))
-			atomic.AddInt64(&pr.BlockedReqs, 1)
-			rec := newReqRecord(pr.Port, clientIP, net.JoinHostPort(origHost, portStr), "-", up.Addr(), protoLabel, false)
-			finishReq(rec, origHost, "-", 0, 0, "BLK", "anti-leak: doh failed")
-			return
-		}
-		if isPrivateOrReserved(ipStr) {
-			_, _ = clientConn.Write([]byte("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n"))
-			atomic.AddInt64(&pr.BlockedReqs, 1)
-			return
-		}
-		sentHost = ipStr
-		sanitized = true
-		atomic.AddInt64(&pr.SanitizedReqs, 1)
-	}
-
-	rec := newReqRecord(
-		pr.Port, clientIP,
-		net.JoinHostPort(origHost, portStr),
-		net.JoinHostPort(sentHost, portStr),
-		up.Addr(), protoLabel, sanitized,
-	)
-	addActiveReq(rec)
-
-	if !isTunnel && up.Proto == "http" {
-		upConn, err := net.DialTimeout("tcp4", up.Addr(), 8*time.Second)
+func handleHTTP(clientConn net.Conn, br *bufio.Reader, pr *PortRunner, up Upstream, clientIP string) {
+	for {
+		_ = clientConn.SetReadDeadline(time.Now().Add(30 * time.Second))
+		req, err := http.ReadRequest(br)
 		if err != nil {
-			_, _ = clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n"))
-			pr.SetError(err.Error())
-			finishReq(rec, origHost, sentHost, 0, 0, "ERR", err.Error())
 			return
 		}
-		defer upConn.Close()
-		tuneTCP(upConn)
+		_ = clientConn.SetDeadline(time.Now().Add(20 * time.Second))
 
-		req.Header.Del("Proxy-Authorization")
-		req.Header.Del("Proxy-Connection")
-		if up.User != "" || up.Pass != "" {
-			creds := base64.StdEncoding.EncodeToString([]byte(up.User + ":" + up.Pass))
-			req.Header.Set("Proxy-Authorization", "Basic "+creds)
+		localUser, localPass := pr.GetClientCreds()
+		if !checkHTTPAuth(req, localUser, localPass) {
+			_, _ = clientConn.Write([]byte("HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"Proxy\"\r\nConnection: close\r\n\r\n"))
+			if req.Header.Get("Proxy-Authorization") != "" {
+				pr.SetError("wrong pass: " + clientIP)
+			}
+			req.Body.Close()
+			return
 		}
-		if req.URL != nil {
-			req.URL.Host = net.JoinHostPort(sentHost, portStr)
-			if req.URL.Scheme == "" {
-				req.URL.Scheme = "http"
+
+		rawHost := req.Host
+		if rawHost == "" && req.URL != nil {
+			rawHost = req.URL.Host
+		}
+		origHost, portStr, err := net.SplitHostPort(rawHost)
+		if err != nil {
+			origHost = rawHost
+			if req.Method == http.MethodConnect {
+				portStr = "443"
+			} else {
+				portStr = "80"
 			}
 		}
-		req.Close = true
-		if err := req.WriteProxy(upConn); err != nil {
-			pr.SetError(err.Error())
-			finishReq(rec, origHost, sentHost, 0, 0, "ERR", err.Error())
+		origHost = strings.TrimSuffix(strings.TrimSpace(origHost), ".")
+		portNum, err := strconv.Atoi(portStr)
+		if err != nil || portNum < 1 || portNum > 65535 {
+			_, _ = clientConn.Write([]byte("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n"))
+			req.Body.Close()
 			return
 		}
-		_ = clientConn.SetDeadline(time.Time{})
-		bUp, bDown := relayTCP(clientConn, upConn, br, false)
-		atomic.AddInt64(&pr.BytesUp, bUp)
-		atomic.AddInt64(&pr.BytesDown, bDown)
-		atomic.StoreInt64(&pr.LastOKUnix, time.Now().Unix())
-		finishReq(rec, origHost, sentHost, bUp, bDown, "OK", "")
-		return
-	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
-	upConn, err := dialUpstreamCtx(ctx, up, sentHost, uint16(portNum))
-	cancel()
+		protoLabel := "HTTP-CONNECT"
+		isTunnel := true
+		if req.Method != http.MethodConnect {
+			protoLabel = "HTTP-" + req.Method
+			isTunnel = false
+		}
+
+		if isPrivateOrReserved(origHost) {
+			_, _ = clientConn.Write([]byte("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n"))
+			atomic.AddInt64(&pr.BlockedReqs, 1)
+			rec := newReqRecord(pr.Port, clientIP, net.JoinHostPort(origHost, portStr), "-", up.Addr(), protoLabel, false)
+			finishReq(rec, origHost, "-", 0, 0, "BLK", "private/ipv6 blocked")
+			req.Body.Close()
+			return
+		}
+
+		if blocked, reason := isBlockedRequest(origHost, uint16(portNum)); blocked {
+			respMsg := "HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n"
+			if strings.HasPrefix(strings.ToLower(origHost), "ipv6.") {
+				respMsg = "HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n"
+			}
+			_, _ = clientConn.Write([]byte(respMsg))
+			atomic.AddInt64(&pr.BlockedReqs, 1)
+			rec := newReqRecord(pr.Port, clientIP, net.JoinHostPort(origHost, portStr), "-", up.Addr(), protoLabel, false)
+			finishReq(rec, origHost, "-", 0, 0, "BLK", reason)
+			req.Body.Close()
+			return
+		}
+
+		atomic.AddInt64(&pr.TotalReqs, 1)
+		sentHost := origHost
+		sanitized := false
+		if needsSanitize(origHost) {
+			ipStr, err := resolveDoH(origHost)
+			if err != nil || ipStr == "" {
+				_, _ = clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n"))
+				atomic.AddInt64(&pr.BlockedReqs, 1)
+				rec := newReqRecord(pr.Port, clientIP, net.JoinHostPort(origHost, portStr), "-", up.Addr(), protoLabel, false)
+				finishReq(rec, origHost, "-", 0, 0, "BLK", "anti-leak: doh failed")
+				req.Body.Close()
+				return
+			}
+			if isPrivateOrReserved(ipStr) {
+				_, _ = clientConn.Write([]byte("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n"))
+				atomic.AddInt64(&pr.BlockedReqs, 1)
+				req.Body.Close()
+				return
+			}
+			sentHost = ipStr
+			sanitized = true
+			atomic.AddInt64(&pr.SanitizedReqs, 1)
+		}
+
+		rec := newReqRecord(
+			pr.Port, clientIP,
+			net.JoinHostPort(origHost, portStr),
+			net.JoinHostPort(sentHost, portStr),
+			up.Addr(), protoLabel, sanitized,
+		)
+		addActiveReq(rec)
+
+		if isTunnel {
+			req.Body.Close()
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			upConn, err := dialUpstreamCtx(ctx, up, sentHost, uint16(portNum))
+			cancel()
+			if err != nil {
+				_, _ = clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n"))
+				pr.SetError(err.Error())
+				finishReq(rec, origHost, sentHost, 0, 0, "ERR", err.Error())
+				return
+			}
+			defer upConn.Close()
+
+			if _, err := clientConn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n")); err != nil {
+				finishReq(rec, origHost, sentHost, 0, 0, "ERR", "client write fail")
+				return
+			}
+			_ = clientConn.SetDeadline(time.Time{})
+			bUp, bDown := relayTCP(clientConn, upConn, br)
+			atomic.AddInt64(&pr.BytesUp, bUp)
+			atomic.AddInt64(&pr.BytesDown, bDown)
+			atomic.StoreInt64(&pr.LastOKUnix, time.Now().Unix())
+			finishReq(rec, origHost, sentHost, bUp, bDown, "OK", "")
+			return
+		}
+
+		keepAlive := handleHTTPPlain(clientConn, req, pr, up, rec, origHost, sentHost, portStr, uint16(portNum))
+		if !keepAlive {
+			return
+		}
+	}
+}
+
+func handleHTTPPlain(clientConn net.Conn, req *http.Request, pr *PortRunner, up Upstream, rec *RequestRecord, origHost, sentHost, portStr string, portNum uint16) bool {
+	origBody := req.Body
+	defer origBody.Close()
+
+	clientKeepAlive := req.ProtoAtLeast(1, 1) &&
+		!strings.EqualFold(req.Header.Get("Connection"), "close") &&
+		!strings.EqualFold(req.Header.Get("Proxy-Connection"), "close")
+
+	var upConn net.Conn
+	var err error
+	if up.Proto == "http" {
+		upConn, err = net.DialTimeout("tcp4", up.Addr(), 15*time.Second)
+	} else {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		upConn, err = dialUpstreamCtx(ctx, up, sentHost, portNum)
+		cancel()
+	}
 	if err != nil {
 		_, _ = clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n"))
 		pr.SetError(err.Error())
 		finishReq(rec, origHost, sentHost, 0, 0, "ERR", err.Error())
-		return
+		return false
 	}
 	defer upConn.Close()
+	tuneTCP(upConn)
+	_ = upConn.SetDeadline(time.Now().Add(25 * time.Second))
 
-	if isTunnel {
-		if _, err := clientConn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n")); err != nil {
-			finishReq(rec, origHost, sentHost, 0, 0, "ERR", "client write fail")
-			return
-		}
-	} else {
-		req.Header.Del("Proxy-Authorization")
-		req.Header.Del("Proxy-Connection")
-		req.Close = true
-		if err := req.Write(upConn); err != nil {
-			finishReq(rec, origHost, sentHost, 0, 0, "ERR", err.Error())
-			return
+	req.Header.Del("Proxy-Authorization")
+	req.Header.Del("Proxy-Connection")
+	if up.Proto == "http" && (up.User != "" || up.Pass != "") {
+		creds := base64.StdEncoding.EncodeToString([]byte(up.User + ":" + up.Pass))
+		req.Header.Set("Proxy-Authorization", "Basic "+creds)
+	}
+	if up.Proto == "http" && req.URL != nil {
+		req.URL.Host = net.JoinHostPort(sentHost, portStr)
+		if req.URL.Scheme == "" {
+			req.URL.Scheme = "http"
 		}
 	}
 
-	_ = clientConn.SetDeadline(time.Time{})
-	bUp, bDown := relayTCP(clientConn, upConn, br, isTunnel)
-	atomic.AddInt64(&pr.BytesUp, bUp)
-	atomic.AddInt64(&pr.BytesDown, bDown)
+	req.Close = true
+	cr := &countReader{r: origBody}
+	req.Body = io.NopCloser(cr)
+
+	var wErr error
+	if up.Proto == "http" {
+		wErr = req.WriteProxy(upConn)
+	} else {
+		wErr = req.Write(upConn)
+	}
+	if wErr != nil {
+		_, _ = clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n"))
+		pr.SetError(wErr.Error())
+		finishReq(rec, origHost, sentHost, cr.n, 0, "ERR", wErr.Error())
+		return false
+	}
+
+	resp, rErr := http.ReadResponse(bufio.NewReader(upConn), req)
+	if rErr != nil {
+		_, _ = clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n"))
+		pr.SetError(rErr.Error())
+		finishReq(rec, origHost, sentHost, cr.n, 0, "ERR", rErr.Error())
+		return false
+	}
+	defer resp.Body.Close()
+
+	resp.Close = !clientKeepAlive
+	if clientKeepAlive {
+		resp.Header.Set("Proxy-Connection", "keep-alive")
+	}
+
+	_ = clientConn.SetWriteDeadline(time.Now().Add(25 * time.Second))
+	cw := &countWriter{w: clientConn}
+	if err := resp.Write(cw); err != nil {
+		finishReq(rec, origHost, sentHost, cr.n, cw.n, "ERR", "client write fail")
+		return false
+	}
+
+	atomic.AddInt64(&pr.BytesUp, cr.n)
+	atomic.AddInt64(&pr.BytesDown, cw.n)
 	atomic.StoreInt64(&pr.LastOKUnix, time.Now().Unix())
-	finishReq(rec, origHost, sentHost, bUp, bDown, "OK", "")
+	finishReq(rec, origHost, sentHost, cr.n, cw.n, "OK", "")
+	return clientKeepAlive
 }

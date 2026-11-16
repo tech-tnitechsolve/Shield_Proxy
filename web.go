@@ -213,7 +213,7 @@ func probeRunner(ctx context.Context, pr *PortRunner, mode string) (string, int6
 		targetHost, targetPort = "api.ipify.org", uint16(80)
 	}
 
-	ctxDial, cancel := context.WithTimeout(ctx, 10*time.Second)
+	ctxDial, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()
 
 	conn, err := dialUpstreamCtx(ctxDial, up, targetHost, targetPort)
@@ -392,7 +392,7 @@ func apiTestSinglePort(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 14*time.Second)
 	defer cancel()
 	st, lat, exitIP, errMsg := probeRunner(ctx, pr, body.Mode)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -571,6 +571,8 @@ func apiPorts(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cfgMu.RLock()
+	fallbackU := appCfg.ProxyUser
+	fallbackP := appCfg.ProxyPass
 	entries := make([]ProxyEntry, len(appCfg.ProxyEntries))
 	copy(entries, appCfg.ProxyEntries)
 	cfgMu.RUnlock()
@@ -580,6 +582,9 @@ func apiPorts(w http.ResponseWriter, r *http.Request) {
 		Group         string `json:"group"`
 		Note          string `json:"note"`
 		Enabled       bool   `json:"enabled"`
+		ProxyUser     string `json:"proxy_user"`
+		ProxyPass     string `json:"proxy_pass"`
+		WrappedURL    string `json:"wrapped_url"`
 		Upstream      string `json:"upstream"`
 		UpstreamFull  string `json:"upstream_full"`
 		Proto         string `json:"proto"`
@@ -607,11 +612,15 @@ func apiPorts(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
+		eu, ep := entryCreds(ent, fallbackU, fallbackP)
 		item := portItem{
 			Port:         ent.Port,
 			Group:        grp,
 			Note:         ent.Note,
 			Enabled:      ent.Enabled,
+			ProxyUser:    eu,
+			ProxyPass:    ep,
+			WrappedURL:   fmt.Sprintf("%s://%s:%s@%s:%d", ent.Upstream.Proto, eu, ep, pubIP, ent.Port),
 			Upstream:     ent.Upstream.Addr(),
 			UpstreamFull: formatOneUpstream(ent.Upstream),
 			Proto:        ent.Upstream.Proto,
@@ -666,7 +675,7 @@ func apiPorts(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if q != "" {
-			hay := strings.ToLower(fmt.Sprintf("%d %s %s %s %s %s %s", item.Port, item.Upstream, item.ExitIP, item.LastErr, item.Group, item.Note, item.Proto))
+			hay := strings.ToLower(fmt.Sprintf("%d %s %s %s %s %s %s %s", item.Port, item.Upstream, item.ExitIP, item.LastErr, item.Group, item.Note, item.Proto, item.ProxyUser))
 			if !strings.Contains(hay, q) {
 				continue
 			}
@@ -913,7 +922,7 @@ func apiClearLogs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// ==================== Smart Proxy Manager APIs ====================
+// ==================== Preview Check Trung + Smart Proxy Manager ====================
 func apiGetConfig(w http.ResponseWriter, r *http.Request) {
 	cfgMu.RLock()
 	c := appCfg
@@ -933,6 +942,29 @@ func apiGetConfig(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func apiPreviewProxies(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		return
+	}
+	var body struct {
+		ProxiesRaw     string `json:"proxies_raw"`
+		DefaultUpProto string `json:"default_up_proto"`
+		Mode           string `json:"mode"`
+		Dedup          bool   `json:"dedup"`
+	}
+	if json.NewDecoder(r.Body).Decode(&body) != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+	cfgMu.RLock()
+	existing := make([]ProxyEntry, len(appCfg.ProxyEntries))
+	copy(existing, appCfg.ProxyEntries)
+	cfgMu.RUnlock()
+
+	prev := previewProxies(body.ProxiesRaw, body.DefaultUpProto, body.Mode, body.Dedup, existing)
+	writeJSON(w, http.StatusOK, prev)
+}
+
 func apiAddOrReplaceProxies(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		return
@@ -942,7 +974,7 @@ func apiAddOrReplaceProxies(w http.ResponseWriter, r *http.Request) {
 		DefaultUpProto string `json:"default_up_proto"`
 		Group          string `json:"group"`
 		Note           string `json:"note"`
-		Mode           string `json:"mode"`
+		Mode           string `json:"mode"` // "append" or "replace"
 		Dedup          bool   `json:"dedup"`
 	}
 	if json.NewDecoder(r.Body).Decode(&body) != nil {
@@ -957,45 +989,44 @@ func apiAddOrReplaceProxies(w http.ResponseWriter, r *http.Request) {
 		grp = "Mac dinh"
 	}
 	note := strings.TrimSpace(body.Note)
-	pStats := parseProxiesFlexible(body.ProxiesRaw, body.DefaultUpProto, body.Dedup)
 
 	var addedPorts []int
-	skippedDupes := pStats.Dupes
+	var prev PreviewResult
 
 	cfgMu.Lock()
 	newCfg := appCfg
 	newCfg.DefaultUpProto = body.DefaultUpProto
+	prev = previewProxies(body.ProxiesRaw, body.DefaultUpProto, body.Mode, body.Dedup, newCfg.ProxyEntries)
 
+	usedUsers := make(map[string]bool)
 	if body.Mode == "replace" {
-		newEntries := make([]ProxyEntry, 0, len(pStats.Items))
-		for i, u := range pStats.Items {
+		newEntries := make([]ProxyEntry, 0, len(prev.ValidNew))
+		for i, u := range prev.ValidNew {
 			p := newCfg.StartPort + i
 			if p > 65535 {
 				break
 			}
+			pu, pp := genUniqueProxyCreds(usedUsers)
 			newEntries = append(newEntries, ProxyEntry{
-				Port: p, Group: grp, Note: note, Enabled: true, Upstream: u,
+				Port: p, Group: grp, Note: note, Enabled: true, User: pu, Pass: pp, Upstream: u,
 			})
 			addedPorts = append(addedPorts, p)
 		}
 		newCfg.ProxyEntries = newEntries
 	} else {
 		usedPorts := make(map[int]bool, len(newCfg.ProxyEntries))
-		existingKeys := make(map[string]bool, len(newCfg.ProxyEntries))
 		maxPort := newCfg.StartPort - 1
 		for _, e := range newCfg.ProxyEntries {
 			usedPorts[e.Port] = true
-			existingKeys[upstreamKey(e.Upstream)] = true
+			if e.User != "" {
+				usedUsers[e.User] = true
+			}
 			if e.Port > maxPort {
 				maxPort = e.Port
 			}
 		}
 		nextPort := maxPort + 1
-		for _, u := range pStats.Items {
-			if body.Dedup && existingKeys[upstreamKey(u)] {
-				skippedDupes++
-				continue
-			}
+		for _, u := range prev.ValidNew {
 			for usedPorts[nextPort] && nextPort <= 65535 {
 				nextPort++
 			}
@@ -1003,9 +1034,9 @@ func apiAddOrReplaceProxies(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 			usedPorts[nextPort] = true
-			existingKeys[upstreamKey(u)] = true
+			pu, pp := genUniqueProxyCreds(usedUsers)
 			newCfg.ProxyEntries = append(newCfg.ProxyEntries, ProxyEntry{
-				Port: nextPort, Group: grp, Note: note, Enabled: true, Upstream: u,
+				Port: nextPort, Group: grp, Note: note, Enabled: true, User: pu, Pass: pp, Upstream: u,
 			})
 			addedPorts = append(addedPorts, nextPort)
 			nextPort++
@@ -1026,8 +1057,9 @@ func apiAddOrReplaceProxies(w http.ResponseWriter, r *http.Request) {
 		"status":       "ok",
 		"active_ports": cnt,
 		"added":        len(addedPorts),
-		"dupes":        skippedDupes,
-		"invalid":      pStats.Invalid,
+		"dup_batch":    len(prev.DupBatch),
+		"dup_existing": len(prev.DupExisting),
+		"invalid":      len(prev.InvalidLines),
 	}
 	if err != nil {
 		resp["warning"] = err.Error()
@@ -1041,10 +1073,12 @@ func apiProxyEntryAction(w http.ResponseWriter, r *http.Request) {
 	}
 	var body struct {
 		Port         int    `json:"port"`
-		Action       string `json:"action"`
+		Action       string `json:"action"` // "toggle", "edit", "delete", "regen_auth"
 		UpstreamLine string `json:"upstream_line"`
 		Group        string `json:"group"`
 		Note         string `json:"note"`
+		ProxyUser    string `json:"proxy_user"`
+		ProxyPass    string `json:"proxy_pass"`
 	}
 	if json.NewDecoder(r.Body).Decode(&body) != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
@@ -1056,6 +1090,13 @@ func apiProxyEntryAction(w http.ResponseWriter, r *http.Request) {
 
 	cfgMu.Lock()
 	newCfg := appCfg
+	usedUsers := make(map[string]bool, len(newCfg.ProxyEntries))
+	for _, e := range newCfg.ProxyEntries {
+		if e.User != "" {
+			usedUsers[e.User] = true
+		}
+	}
+
 	outEntries := make([]ProxyEntry, 0, len(newCfg.ProxyEntries))
 	for _, e := range newCfg.ProxyEntries {
 		if e.Port != body.Port {
@@ -1070,6 +1111,9 @@ func apiProxyEntryAction(w http.ResponseWriter, r *http.Request) {
 			if e.Enabled {
 				testPort = []int{e.Port}
 			}
+			outEntries = append(outEntries, e)
+		case "regen_auth":
+			e.User, e.Pass = genUniqueProxyCreds(usedUsers)
 			outEntries = append(outEntries, e)
 		case "edit":
 			if strings.TrimSpace(body.UpstreamLine) != "" {
@@ -1088,6 +1132,10 @@ func apiProxyEntryAction(w http.ResponseWriter, r *http.Request) {
 				e.Group = strings.TrimSpace(body.Group)
 			}
 			e.Note = strings.TrimSpace(body.Note)
+			if strings.TrimSpace(body.ProxyUser) != "" && strings.TrimSpace(body.ProxyPass) != "" {
+				e.User = strings.TrimSpace(body.ProxyUser)
+				e.Pass = strings.TrimSpace(body.ProxyPass)
+			}
 			outEntries = append(outEntries, e)
 		default:
 			outEntries = append(outEntries, e)
@@ -1116,7 +1164,7 @@ func apiProxyBulkAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Action string `json:"action"`
+		Action string `json:"action"` // "enable", "disable", "delete_dead", "delete_selected", "set_group", "reindex", "regen_auth"
 		Ports  []int  `json:"ports"`
 		Group  string `json:"group"`
 	}
@@ -1145,6 +1193,12 @@ func apiProxyBulkAction(w http.ResponseWriter, r *http.Request) {
 	affected := 0
 	cfgMu.Lock()
 	newCfg := appCfg
+	usedUsers := make(map[string]bool, len(newCfg.ProxyEntries))
+	for _, e := range newCfg.ProxyEntries {
+		if e.User != "" {
+			usedUsers[e.User] = true
+		}
+	}
 	out := make([]ProxyEntry, 0, len(newCfg.ProxyEntries))
 
 	for i, e := range newCfg.ProxyEntries {
@@ -1177,6 +1231,12 @@ func apiProxyBulkAction(w http.ResponseWriter, r *http.Request) {
 		case "set_group":
 			if inTarget && strings.TrimSpace(body.Group) != "" {
 				e.Group = strings.TrimSpace(body.Group)
+				affected++
+			}
+			out = append(out, e)
+		case "regen_auth":
+			if inTarget {
+				e.User, e.Pass = genUniqueProxyCreds(usedUsers)
 				affected++
 			}
 			out = append(out, e)
@@ -1222,7 +1282,7 @@ func apiSaveSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if strings.TrimSpace(body.ProxyUser) == "" || strings.TrimSpace(body.ProxyPass) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Username/Password proxy khong duoc de trong!"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Username/Password mac dinh khong duoc de trong!"})
 		return
 	}
 	if body.StartPort < 1024 || body.StartPort > 60000 {
@@ -1277,19 +1337,35 @@ func apiSaveSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// Da dang Option xuat dau ra: match 1:1, user:pass@ip:port, ip:port:user:pass, ip:port, csv, json, custom
 func apiExportWrapped(w http.ResponseWriter, r *http.Request) {
 	filter := r.URL.Query().Get("filter")
 	groupFilter := r.URL.Query().Get("group")
+	protoFilter := r.URL.Query().Get("proto") // ALL, http, socks5
+	format := r.URL.Query().Get("format")     // match, userpass_ipport, ipport_userpass, ipport, csv, json, custom
+	tmpl := r.URL.Query().Get("tmpl")
+	if format == "" {
+		format = "match"
+	}
 
 	cfgMu.RLock()
-	c := appCfg
+	fallbackU := appCfg.ProxyUser
+	fallbackP := appCfg.ProxyPass
 	entries := make([]ProxyEntry, len(appCfg.ProxyEntries))
 	copy(entries, appCfg.ProxyEntries)
 	cfgMu.RUnlock()
 
 	type exportRow struct {
-		port  int
-		proto string
+		Port     int    `json:"port"`
+		Group    string `json:"group"`
+		Proto    string `json:"proto"`
+		User     string `json:"user"`
+		Pass     string `json:"pass"`
+		IP       string `json:"ip"`
+		URL      string `json:"url"`
+		Upstream string `json:"upstream"`
+		ExitIP   string `json:"exit_ip"`
+		Health   string `json:"health"`
 	}
 	var rows []exportRow
 	runnersMu.RLock()
@@ -1304,10 +1380,14 @@ func apiExportWrapped(w http.ResponseWriter, r *http.Request) {
 		if groupFilter != "" && groupFilter != "ALL" && grp != groupFilter {
 			continue
 		}
-		hl := "untested"
+		if protoFilter != "" && protoFilter != "ALL" && ent.Upstream.Proto != protoFilter {
+			continue
+		}
+		hl, eip := "untested", ""
 		if pr, ok := runners[ent.Port]; ok {
 			pr.mu.RLock()
 			hl = pr.health
+			eip = pr.exitIP
 			pr.mu.RUnlock()
 		}
 		if filter == "alive" && hl != "alive" {
@@ -1316,15 +1396,75 @@ func apiExportWrapped(w http.ResponseWriter, r *http.Request) {
 		if filter == "hide_dead" && hl == "dead" {
 			continue
 		}
-		rows = append(rows, exportRow{port: ent.Port, proto: ent.Upstream.Proto})
+		eu, ep := entryCreds(ent, fallbackU, fallbackP)
+		rows = append(rows, exportRow{
+			Port:     ent.Port,
+			Group:    grp,
+			Proto:    ent.Upstream.Proto,
+			User:     eu,
+			Pass:     ep,
+			IP:       pubIP,
+			URL:      fmt.Sprintf("%s://%s:%s@%s:%d", ent.Upstream.Proto, eu, ep, pubIP, ent.Port),
+			Upstream: ent.Upstream.Addr(),
+			ExitIP:   eip,
+			Health:   hl,
+		})
 	}
 	runnersMu.RUnlock()
 
-	sort.Slice(rows, func(i, j int) bool { return rows[i].port < rows[j].port })
+	sort.Slice(rows, func(i, j int) bool { return rows[i].Port < rows[j].Port })
+
+	if format == "json" {
+		if r.URL.Query().Get("dl") == "1" {
+			w.Header().Set("Content-Disposition", `attachment; filename="wrapped_proxies.json"`)
+		}
+		writeJSON(w, http.StatusOK, rows)
+		return
+	}
+
+	if format == "csv" {
+		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+		if r.URL.Query().Get("dl") == "1" {
+			w.Header().Set("Content-Disposition", `attachment; filename="wrapped_proxies.csv"`)
+		}
+		cw := csv.NewWriter(w)
+		_ = cw.Write([]string{"Port", "Group", "Protocol", "ProxyUser", "ProxyPass", "WrappedURL", "Upstream", "ExitIP", "Health"})
+		for _, row := range rows {
+			_ = cw.Write([]string{
+				strconv.Itoa(row.Port), row.Group, row.Proto, row.User, row.Pass,
+				row.URL, row.Upstream, row.ExitIP, row.Health,
+			})
+		}
+		cw.Flush()
+		return
+	}
 
 	var lines []string
 	for _, row := range rows {
-		lines = append(lines, fmt.Sprintf("%s://%s:%s@%s:%d", row.proto, c.ProxyUser, c.ProxyPass, pubIP, row.port))
+		switch format {
+		case "userpass_ipport":
+			lines = append(lines, fmt.Sprintf("%s:%s@%s:%d", row.User, row.Pass, row.IP, row.Port))
+		case "ipport_userpass":
+			lines = append(lines, fmt.Sprintf("%s:%d:%s:%s", row.IP, row.Port, row.User, row.Pass))
+		case "ipport":
+			lines = append(lines, fmt.Sprintf("%s:%d", row.IP, row.Port))
+		case "custom":
+			s := tmpl
+			if s == "" {
+				s = "{proto}://{user}:{pass}@{ip}:{port}"
+			}
+			s = strings.ReplaceAll(s, "{proto}", row.Proto)
+			s = strings.ReplaceAll(s, "{user}", row.User)
+			s = strings.ReplaceAll(s, "{pass}", row.Pass)
+			s = strings.ReplaceAll(s, "{ip}", row.IP)
+			s = strings.ReplaceAll(s, "{port}", strconv.Itoa(row.Port))
+			s = strings.ReplaceAll(s, "{group}", row.Group)
+			s = strings.ReplaceAll(s, "{upstream}", row.Upstream)
+			s = strings.ReplaceAll(s, "{exit_ip}", row.ExitIP)
+			lines = append(lines, s)
+		default: // "match" 1:1 protocol
+			lines = append(lines, row.URL)
+		}
 	}
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -1358,9 +1498,11 @@ func apiRestoreConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(c.ProxyEntries) == 0 && strings.TrimSpace(c.ProxiesRaw) != "" {
 		ps := parseProxiesFlexible(c.ProxiesRaw, c.DefaultUpProto, false)
+		usedU := make(map[string]bool)
 		for i, u := range ps.Items {
+			pu, pp := genUniqueProxyCreds(usedU)
 			c.ProxyEntries = append(c.ProxyEntries, ProxyEntry{
-				Port: c.StartPort + i, Group: "Mac dinh", Enabled: true, Upstream: u,
+				Port: c.StartPort + i, Group: "Mac dinh", Enabled: true, User: pu, Pass: pp, Upstream: u,
 			})
 		}
 	}
@@ -1402,6 +1544,7 @@ func startWebDashboard(port int) {
 	mux.HandleFunc("/api/requests/csv", requireAuth(apiExportCSV))
 	mux.HandleFunc("/api/requests/clear", requireAuth(apiClearLogs))
 	mux.HandleFunc("/api/config", requireAuth(apiGetConfig))
+	mux.HandleFunc("/api/proxies/preview", requireAuth(apiPreviewProxies))
 	mux.HandleFunc("/api/proxies/save", requireAuth(apiAddOrReplaceProxies))
 	mux.HandleFunc("/api/proxies/entry", requireAuth(apiProxyEntryAction))
 	mux.HandleFunc("/api/proxies/bulk", requireAuth(apiProxyBulkAction))

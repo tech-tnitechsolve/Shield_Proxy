@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ProxyShield v3.5 Pro — Smart Gateway &amp; Anti-Abuse</title>
+<title>ProxyShield v4.0 Pro — Smart Gateway &amp; Anti-Abuse</title>
 <style>
   :root {
     --bg: #070b14; --bg2: #0d1322; --card: #111827; --border: #1e293b; --border2: #334155;
@@ -28,7 +28,7 @@
   .pill-red    { background: rgba(239,68,68,0.14); color: var(--red); border-color: rgba(239,68,68,0.35); }
   .pill-purple { background: rgba(167,139,250,0.14); color: var(--purple); border-color: rgba(167,139,250,0.35); }
 
-  .container { width: 100%; max-width: 1780px; margin: 0 auto; padding: 18px 24px; }
+  .container { width: 100%; max-width: 1800px; margin: 0 auto; padding: 18px 24px; }
   @media (max-width: 768px) { .container { padding: 12px; } .topbar { padding: 10px 12px; } }
 
   .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 18px; }
@@ -61,11 +61,14 @@
 
   input, select, textarea { width: 100%; background: var(--bg2); border: 1px solid var(--border2); color: var(--text); padding: 9px 12px; border-radius: 8px; font-size: 13.5px; outline: none; }
   input:focus, select:focus, textarea:focus { border-color: var(--accent); }
-  textarea { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; line-height: 1.5; resize: vertical; }
+  textarea { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; line-height: 1.5; resize: vertical; }
 
   .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
   .form-group { margin-bottom: 14px; }
   .form-group label { display: block; color: var(--muted); font-size: 12.5px; font-weight: 600; margin-bottom: 5px; }
+
+  .preview-box { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-top: 10px; font-size: 12px; }
+  .preview-details { margin-top: 6px; max-height: 75px; overflow-y: auto; color: var(--muted); line-height: 1.45; }
 
   .table-wrap { overflow-x: auto; max-height: 560px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg2); }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -78,7 +81,7 @@
   .login-box { width: 100%; max-width: 420px; background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 30px; box-shadow: 0 20px 50px rgba(0,0,0,0.5); }
 
   .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.68); display: flex; align-items: center; justify-content: center; z-index: 50; padding: 16px; }
-  .modal-box { width: 100%; max-width: 480px; background: var(--card); border: 1px solid var(--border2); border-radius: 14px; padding: 24px; }
+  .modal-box { width: 100%; max-width: 500px; background: var(--card); border: 1px solid var(--border2); border-radius: 14px; padding: 24px; }
   .toast { position: fixed; bottom: 24px; right: 24px; background: #0f172a; border: 1px solid var(--accent); color: var(--text); padding: 12px 18px; border-radius: 10px; z-index: 99; font-weight: 600; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
 </style>
 </head>
@@ -86,7 +89,7 @@
 
 <div id="loginView" class="login-wrap hidden">
   <div class="login-box">
-    <h2 id="loginTitle" style="margin:0 0 8px 0;color:var(--accent)">ProxyShield v3.5 Pro</h2>
+    <h2 id="loginTitle" style="margin:0 0 8px 0;color:var(--accent)">ProxyShield v4.0 Pro</h2>
     <p id="loginSub" style="color:var(--muted);font-size:13.5px;margin:0 0 20px 0">Đăng nhập hệ thống quản lý Proxy</p>
     <div class="form-group"><label>Tài khoản Admin</label><input id="lu" placeholder="Nhập username..." value="admin"></div>
     <div class="form-group"><label>Mật khẩu</label><input id="lp" type="password" placeholder="Nhập mật khẩu..." onkeydown="if(event.key==='Enter')doLogin()"></div>
@@ -98,12 +101,12 @@
 <div id="appView" class="hidden">
   <div class="topbar">
     <div class="brand">
-      <div class="brand-title">ProxyShield v3.5 Pro</div>
+      <div class="brand-title">ProxyShield v4.0 Pro</div>
       <span id="pubIpBadge" class="pill pill-blue mono">IP: ...</span>
       <span id="uptimeBadge" class="pill mono">Up: ...</span>
       <span id="autoBadge" class="pill pill-green mono">Auto-Check: 5p</span>
       <span id="rulesBadge" class="pill pill-purple mono">Ẩn: 0 | Chặn: 0</span>
-      <span id="credBadge" class="pill pill-amber mono">Auth: ...</span>
+      <span class="pill pill-amber mono">Auth: Riêng từng cổng</span>
     </div>
     <div style="display:flex;gap:8px;align-items:center">
       <button class="btn btn-sec btn-sm" onclick="togglePause()" id="pauseBtn">Tự động: 3s</button>
@@ -156,34 +159,45 @@
         <button class="tab" onclick="switchTab('requests', this)">2. Theo Dõi Request (Logs)</button>
         <button class="tab" onclick="switchTab('settings', this)">3. Cài Đặt Hệ Thống (All-in-One)</button>
       </div>
-      <button id="toggleStudioBtn" class="btn btn-sec btn-sm" onclick="toggleStudio()">Thu gọn / Mở khung Thêm Proxy</button>
+      <button id="toggleStudioBtn" class="btn btn-sec btn-sm" onclick="toggleStudio()">Thu gọn / Mở khung Thêm &amp; Xuất</button>
     </div>
 
-    <!-- TAB 1: QUẢN LÝ & BỌC PROXY THÔNG MINH -->
+    <!-- TAB 1: THÊM NHANH CHECK TRÙNG + XUẤT ĐA DẠNG + QUẢN TRỊ TỪNG IP -->
     <div id="tab-proxies">
       <div id="studioWrap" class="split-2" style="margin-bottom:16px">
         <div class="card">
           <div class="row" style="justify-content:space-between;margin-bottom:8px">
-            <h3 style="margin:0;font-size:15.5px">Thêm / Nhập Proxy Nguồn</h3>
+            <h3 style="margin:0;font-size:15.5px">Thêm Proxy Nguồn (Tự Sinh User:Pass Riêng Không Trùng)</h3>
             <label class="btn btn-sec btn-sm" style="cursor:pointer;margin:0">
               Tải File .txt<input type="file" accept=".txt,.list" style="display:none" onchange="uploadProxyFile(event)">
             </label>
           </div>
           <div class="row">
-            <input id="addGroup" placeholder="Nhóm (vd: WS-Acc1)" value="Mac dinh" style="max-width:155px">
-            <input id="addNote" placeholder="Ghi chú (tuỳ chọn)" style="max-width:165px">
-            <select id="defUpProto" style="max-width:185px" onchange="analyzeInputBox()">
+            <input id="addGroup" placeholder="Nhóm (vd: WS-Acc1)" value="Mac dinh" style="max-width:150px">
+            <input id="addNote" placeholder="Ghi chú (tuỳ chọn)" style="max-width:160px">
+            <select id="defUpProto" style="max-width:175px" onchange="schedulePreview()">
               <option value="http">Ko prefix &rarr; HTTP</option>
               <option value="socks5">Ko prefix &rarr; SOCKS5</option>
             </select>
             <label style="display:flex;align-items:center;gap:5px;font-size:12.5px;color:var(--muted);cursor:pointer">
-              <input type="checkbox" id="chkDedup" checked style="width:auto"> Lọc trùng
+              <input type="checkbox" id="chkDedup" checked style="width:auto" onchange="schedulePreview()"> Tự bỏ qua trùng
             </label>
-            <span id="inCountBadge" class="pill pill-blue mono">0 hợp lệ</span>
           </div>
-          <textarea id="proxiesBox" rows="8" oninput="analyzeInputBox()" placeholder="Dán danh sách proxy mới vào đây (không cần dán lại các con cũ):&#10;http://user:pass@198.12.102.93:40540&#10;socks5://user:pass@38.154.185.97:6370"></textarea>
-          <div class="row" style="margin-top:10px;margin-bottom:0">
-            <button class="btn" onclick="saveProxies('append')">+ Thêm Vào Danh Sách</button>
+          <textarea id="proxiesBox" rows="7" oninput="schedulePreview()" placeholder="Dán danh sách proxy mới vào đây (tự check trùng với dàn đang chạy):&#10;http://user:pass@198.12.102.93:40540&#10;socks5://user:pass@38.154.185.97:6370"></textarea>
+
+          <!-- BẢNG CHECK TRÙNG LẶP TRỰC QUAN -->
+          <div class="preview-box">
+            <div class="row" style="margin-bottom:0;gap:6px">
+              <span id="pvNew" class="pill pill-green mono">Mới hợp lệ: 0</span>
+              <span id="pvDupEx" class="pill pill-amber mono">Trùng đang chạy: 0</span>
+              <span id="pvDupBat" class="pill pill-amber mono">Trùng trong lô: 0</span>
+              <span id="pvInv" class="pill pill-red mono">Sai cú pháp: 0</span>
+            </div>
+            <div id="pvDetails" class="preview-details hidden mono"></div>
+          </div>
+
+          <div class="row" style="margin-top:12px;margin-bottom:0">
+            <button class="btn" onclick="saveProxies('append')">+ Thêm Mới (Bỏ Trùng &amp; Sinh Pass Riêng)</button>
             <button class="btn btn-amber" onclick="saveProxies('replace')">Ghi Đè Toàn Bộ</button>
             <button class="btn btn-green" onclick="startScan('deep')">Check Lại Nhóm/All</button>
           </div>
@@ -191,23 +205,42 @@
 
         <div class="card">
           <div class="row" style="justify-content:space-between;margin-bottom:8px">
-            <h3 style="margin:0;font-size:15.5px">Xuất Proxy Đã Bọc (Khớp 1:1 Giao Thức)</h3>
+            <h3 style="margin:0;font-size:15.5px">Xuất Proxy Đã Bọc (Đa Dạng Tùy Chọn)</h3>
             <span id="outCountBadge" class="pill pill-green mono">0 sẵn sàng</span>
           </div>
           <div class="row">
-            <select id="expGroup" style="max-width:190px" onchange="refreshOutputBox()">
+            <select id="expGroup" style="max-width:155px" onchange="refreshOutputBox()">
               <option value="ALL">Tất cả nhóm</option>
             </select>
-            <select id="expFilter" style="max-width:210px" onchange="refreshOutputBox()">
-              <option value="all">Tất cả cổng đang BẬT</option>
-              <option value="alive">Chỉ lấy proxy ĐANG SỐNG (LIVE)</option>
-              <option value="hide_dead">Ẩn proxy ĐÃ CHẾT (DIE)</option>
+            <select id="expProto" style="max-width:140px" onchange="refreshOutputBox()">
+              <option value="ALL">Mọi loại</option>
+              <option value="http">Chỉ HTTP</option>
+              <option value="socks5">Chỉ SOCKS5</option>
+            </select>
+            <select id="expFilter" style="max-width:165px" onchange="refreshOutputBox()">
+              <option value="all">Tất cả đang BẬT</option>
+              <option value="alive">Chỉ lấy LIVE</option>
+              <option value="hide_dead">Ẩn proxy DIE</option>
             </select>
           </div>
-          <textarea id="outputBox" rows="8" readonly placeholder="Danh sách proxy đã bọc khớp với bộ lọc ở trên..."></textarea>
+          <div class="row">
+            <select id="expFormat" style="flex:1" onchange="onExportFormatChange()">
+              <option value="match">Chuẩn 1:1 gốc (proto://user:pass@ip:port) — Khuyên dùng</option>
+              <option value="userpass_ipport">user:pass@ip:port (Không tiền tố)</option>
+              <option value="ipport_userpass">ip:port:user:pass</option>
+              <option value="ipport">ip:port</option>
+              <option value="csv">CSV (Cổng, Nhóm, User, Pass, URL, Exit IP)</option>
+              <option value="json">JSON (Dạng mảng API)</option>
+              <option value="custom">Tự nhập Template tùy chỉnh...</option>
+            </select>
+          </div>
+          <div id="customTmplRow" class="form-group hidden" style="margin-bottom:8px">
+            <input id="customTmpl" class="mono" value="{proto}://{user}:{pass}@{ip}:{port}" placeholder="Biến: {proto} {user} {pass} {ip} {port} {group} {upstream} {exit_ip}" oninput="refreshOutputBox()">
+          </div>
+          <textarea id="outputBox" rows="8" readonly placeholder="Danh sách proxy đã bọc theo tùy chọn sẽ hiện ở đây..."></textarea>
           <div class="row" style="margin-top:10px;margin-bottom:0">
             <button class="btn" onclick="copyOutputBox()">Copy Danh Sách</button>
-            <button class="btn btn-sec" onclick="downloadOutputBox()">Tải File .txt</button>
+            <button class="btn btn-sec" onclick="downloadOutputBox()">Tải Về File</button>
             <button class="btn btn-sec" onclick="refreshOutputBox()">Làm mới</button>
           </div>
         </div>
@@ -217,7 +250,7 @@
       <div class="card">
         <div class="row" style="justify-content:space-between">
           <div class="row" style="margin:0;flex:1">
-            <input id="pq" placeholder="Tìm cổng, IP, nhóm, ghi chú..." style="max-width:220px" oninput="debouncedLoadPorts()">
+            <input id="pq" placeholder="Tìm cổng, IP, nhóm, user, ghi chú..." style="max-width:230px" oninput="debouncedLoadPorts()">
             <select id="pgroup" style="max-width:155px" onchange="portPage=1;lastPortSig='';loadPorts()">
               <option value="ALL">Tất cả nhóm</option>
             </select>
@@ -244,12 +277,12 @@
           </div>
         </div>
 
-        <!-- THANH THAO TÁC HÀNG LOẠT -->
         <div class="row" style="background:var(--bg2);padding:8px 12px;border-radius:8px;border:1px solid var(--border)">
           <span id="selCountText" class="mono" style="font-size:12px;color:var(--muted)">Đã chọn: 0</span>
           <button class="btn btn-green btn-sm" onclick="bulkAction('enable')">Bật Đã Chọn</button>
           <button class="btn btn-amber btn-sm" onclick="bulkAction('disable')">Tắt Đã Chọn</button>
-          <button class="btn btn-sec btn-sm" onclick="bulkSetGroup()">Đổi Nhóm Đã Chọn</button>
+          <button class="btn btn-sec btn-sm" onclick="bulkSetGroup()">Đổi Nhóm</button>
+          <button class="btn btn-sec btn-sm" onclick="bulkAction('regen_auth')">Đổi Pass Ngẫu Nhiên</button>
           <button class="btn btn-red btn-sm" onclick="bulkAction('delete_selected')">Xóa Đã Chọn</button>
           <span style="border-left:1px solid var(--border2);height:18px;margin:0 4px"></span>
           <button class="btn btn-red btn-sm" onclick="bulkAction('delete_dead')">Xóa Toàn Bộ DIE</button>
@@ -262,9 +295,9 @@
             <thead>
               <tr>
                 <th><input type="checkbox" id="chkAll" style="width:auto" onclick="toggleSelectAll(this)"></th>
-                <th>Cổng</th><th>Nhóm / Ghi chú</th><th>Proxy Nguồn</th><th>Loại</th><th>Trạng thái</th>
+                <th>Cổng</th><th>Nhóm / Ghi chú</th><th>Auth Riêng (User:Pass)</th><th>Proxy Nguồn</th><th>Loại</th><th>Trạng thái</th>
                 <th>Ping</th><th>Exit IP</th><th>Live</th><th>Req / Ẩn / Chặn / Lỗi</th>
-                <th>Tổng Data</th><th>Up / Down</th><th>Chi tiết lỗi</th><th>Thao tác IP</th>
+                <th>Tổng Data</th><th>Chi tiết lỗi</th><th>Thao tác IP</th>
               </tr>
             </thead>
             <tbody id="portBody"></tbody>
@@ -316,15 +349,15 @@
     <div id="tab-settings" class="card hidden" style="max-width:920px">
       <h3 style="margin-top:0">Cài Đặt Toàn Bộ Hệ Thống (Lưu Nguyên Tử Chống Mất Khi Reboot)</h3>
       <div class="split-2">
-        <div class="form-group"><label>Tài khoản Proxy (Username)</label><input id="sProxyUser"></div>
+        <div class="form-group"><label>Proxy Auth Mặc định (cho cổng cũ chưa đặt riêng)</label><input id="sProxyUser"></div>
         <div class="form-group">
-          <label>Mật khẩu Proxy (Password)</label>
+          <label>Mật khẩu Mặc định</label>
           <div style="display:flex;gap:8px"><input id="sProxyPass"><button class="btn btn-sec btn-sm" type="button" onclick="genRandomPass()">Random</button></div>
         </div>
       </div>
       <div class="split-2">
         <div class="form-group"><label>Cổng Proxy Bắt Đầu (Start Port)</label><input id="sStartPort" type="number"></div>
-        <div class="form-group"><label>Tự động Check Live mỗi (phút) — 0 để tắt</label><input id="sAutoCheck" type="number" min="0" max="1440"></div>
+        <div class="form-group"><label>Tự động Check Live mỗi (phút) — Khuyên để 0 hoặc 30p</label><input id="sAutoCheck" type="number" min="0" max="1440"></div>
       </div>
       <div class="split-2">
         <div class="form-group"><label>Hạn mức Bandwidth Tháng (TB) — 10 cho Oracle Free, 0 = Unlimited</label><input id="sQuotaTB" type="number" step="0.5" min="0"></div>
@@ -360,12 +393,21 @@
 <div id="editModal" class="modal-bg hidden">
   <div class="modal-box">
     <h3 style="margin-top:0;color:var(--accent)">Sửa Proxy Cổng <span id="emPort" class="mono"></span></h3>
-    <div class="form-group"><label>Proxy Nguồn Mới (giữ nguyên số cổng VPS đang cấp)</label><input id="emUp" class="mono"></div>
-    <div class="form-group"><label>Nhóm (Group)</label><input id="emGrp"></div>
-    <div class="form-group"><label>Ghi chú</label><input id="emNote"></div>
-    <div class="row" style="justify-content:flex-end;margin-bottom:0">
-      <button class="btn btn-sec" onclick="closeEditModal()">Hủy</button>
-      <button class="btn" onclick="saveEditEntry()">Lưu Thay Đổi</button>
+    <div class="form-group"><label>Proxy Nguồn (giữ nguyên cổng VPS đang cấp)</label><input id="emUp" class="mono"></div>
+    <div class="split-2">
+      <div class="form-group"><label>Username Riêng</label><input id="emUser" class="mono"></div>
+      <div class="form-group"><label>Password Riêng</label><input id="emPass" class="mono"></div>
+    </div>
+    <div class="split-2">
+      <div class="form-group"><label>Nhóm (Group)</label><input id="emGrp"></div>
+      <div class="form-group"><label>Ghi chú</label><input id="emNote"></div>
+    </div>
+    <div class="row" style="justify-content:space-between;margin-bottom:0">
+      <button class="btn btn-sec btn-sm" onclick="regenOneAuthInModal()">Tạo Pass Ngẫu Nhiên</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-sec" onclick="closeEditModal()">Hủy</button>
+        <button class="btn" onclick="saveEditEntry()">Lưu Thay Đổi</button>
+      </div>
     </div>
   </div>
 </div>
@@ -374,7 +416,7 @@
 
 <script>
 var paused = false, currentTab = 'proxies', portPage = 1, portTotal = 0;
-var lastPortSig = '', lastReqSig = '', selPorts = {}, editTargetPort = 0, searchTimer = null;
+var lastPortSig = '', lastReqSig = '', selPorts = {}, editTargetPort = 0, searchTimer = null, previewTimer = null;
 
 function toast(msg) {
   var el = document.getElementById('toast');
@@ -410,22 +452,71 @@ async function copyTextSafe(txt) {
   document.body.appendChild(ta); ta.focus(); ta.select();
   document.execCommand('copy'); document.body.removeChild(ta);
 }
-function genRandomPass() {
-  var c = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789', r = '';
-  for (var i = 0; i < 14; i++) r += c.charAt(Math.floor(Math.random() * c.length));
-  document.getElementById('sProxyPass').value = r;
+async function copyOneURL(url) { await copyTextSafe(url); toast('Đã copy: ' + url); }
+function randStr(n) {
+  var c = 'abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789', r = '';
+  for (var i = 0; i < n; i++) r += c.charAt(Math.floor(Math.random() * c.length));
+  return r;
+}
+function genRandomPass() { document.getElementById('sProxyPass').value = randStr(14); }
+function regenOneAuthInModal() {
+  document.getElementById('emUser').value = 'px' + randStr(8);
+  document.getElementById('emPass').value = randStr(14);
 }
 function toggleStudio() { document.getElementById('studioWrap').classList.toggle('hidden'); }
 function debouncedLoadPorts() {
   clearTimeout(searchTimer);
   searchTimer = setTimeout(function() { portPage = 1; lastPortSig = ''; loadPorts(); }, 250);
 }
+function schedulePreview() {
+  clearTimeout(previewTimer);
+  previewTimer = setTimeout(runPreview, 250);
+}
+
+async function runPreview() {
+  var raw = document.getElementById('proxiesBox').value;
+  var det = document.getElementById('pvDetails');
+  if (!raw.trim()) {
+    document.getElementById('pvNew').textContent = 'Mới hợp lệ: 0';
+    document.getElementById('pvDupEx').textContent = 'Trùng đang chạy: 0';
+    document.getElementById('pvDupBat').textContent = 'Trùng trong lô: 0';
+    document.getElementById('pvInv').textContent = 'Sai cú pháp: 0';
+    det.classList.add('hidden'); det.innerHTML = '';
+    return;
+  }
+  try {
+    var d = await (await api('/api/proxies/preview', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        proxies_raw: raw,
+        default_up_proto: document.getElementById('defUpProto').value,
+        mode: 'append',
+        dedup: document.getElementById('chkDedup').checked
+      })
+    })).json();
+    document.getElementById('pvNew').textContent = 'Mới hợp lệ: ' + (d.new_count || 0);
+    document.getElementById('pvDupEx').textContent = 'Trùng đang chạy: ' + (d.dup_existing ? d.dup_existing.length : 0);
+    document.getElementById('pvDupBat').textContent = 'Trùng trong lô: ' + (d.dup_batch ? d.dup_batch.length : 0);
+    document.getElementById('pvInv').textContent = 'Sai cú pháp: ' + (d.invalid_lines ? d.invalid_lines.length : 0);
+
+    var notes = [];
+    if (d.dup_existing && d.dup_existing.length > 0) notes.push('<span style="color:var(--amber)">Bỏ qua trùng đang chạy:</span> ' + esc(d.dup_existing.slice(0, 8).join(', ')) + (d.dup_existing.length > 8 ? ' ...' : ''));
+    if (d.dup_batch && d.dup_batch.length > 0) notes.push('<span style="color:var(--amber)">Trùng trong ô dán:</span> ' + esc(d.dup_batch.slice(0, 6).join(', ')));
+    if (d.invalid_lines && d.invalid_lines.length > 0) notes.push('<span style="color:var(--red)">Lỗi cú pháp:</span> ' + esc(d.invalid_lines.slice(0, 5).join(', ')));
+    if (notes.length > 0) {
+      det.innerHTML = notes.join('<br>');
+      det.classList.remove('hidden');
+    } else {
+      det.classList.add('hidden');
+    }
+  } catch (e) {}
+}
 
 async function checkAuthStatus() {
   try {
     var d = await (await fetch('/api/auth/status')).json();
     var s = !!d.setup_required;
-    document.getElementById('loginTitle').textContent = s ? 'Tạo Tài Khoản Admin Lần Đầu' : 'ProxyShield v3.5 Pro';
+    document.getElementById('loginTitle').textContent = s ? 'Tạo Tài Khoản Admin Lần Đầu' : 'ProxyShield v4.0 Pro';
     document.getElementById('loginSub').textContent = s ? 'Nhập Username & Mật khẩu bạn muốn tạo để đăng nhập:' : 'Đăng nhập hệ thống quản lý Proxy';
     document.getElementById('loginBtn').textContent = s ? 'Tạo Tài Khoản & Đăng Nhập' : 'Đăng nhập';
     if (s && document.getElementById('lu').value === 'admin') document.getElementById('lu').value = '';
@@ -483,7 +574,6 @@ async function loadOverview() {
     document.getElementById('uptimeBadge').textContent = 'Up: ' + fmtUptime(v.vps_uptime_sec);
     document.getElementById('autoBadge').textContent = d.auto_check_min > 0 ? ('Auto-Check: ' + d.auto_check_min + 'p') : 'Auto-Check: Tắt';
     document.getElementById('rulesBadge').textContent = 'Ẩn: ' + (d.rules_sanitize_cnt || 0) + ' | Chặn: ' + (d.rules_block_cnt || 0) + ' (' + (d.rules_last_sync || '-') + ')';
-    document.getElementById('credBadge').textContent = 'Auth: ' + d.proxy_user + ':' + d.proxy_pass;
     syncGroupDropdowns(d.groups || []);
 
     var cpu = v.cpu_pct || 0;
@@ -557,7 +647,7 @@ function toggleSelectAll(master) {
 }
 
 async function loadPorts() {
-  if (currentTab !== 'proxies' || isSelecting()) return;
+  if (currentTab !== 'proxies' || isSelecting() || !document.getElementById('editModal').classList.contains('hidden')) return;
   try {
     var qs = new URLSearchParams({
       q: document.getElementById('pq').value, group: document.getElementById('pgroup').value,
@@ -587,6 +677,7 @@ async function loadPorts() {
         '<td><input type="checkbox" class="row-chk" value="' + p.port + '" ' + chk + ' style="width:auto" onclick="toggleRowCheck(' + p.port + ',this)"></td>' +
         '<td class="mono"><b>:' + p.port + '</b></td>' +
         '<td><span class="pill pill-purple" style="padding:1px 7px">' + esc(p.group) + '</span>' + (p.note ? ' <span style="font-size:11.5px;color:var(--muted)">' + esc(p.note) + '</span>' : '') + '</td>' +
+        '<td class="mono" style="font-size:12px"><span style="color:var(--amber)">' + esc(p.proxy_user) + '</span>:<span style="color:var(--muted)">' + esc(p.proxy_pass) + '</span> <button class="btn btn-sec btn-sm" style="padding:2px 6px;font-size:11px" onclick="copyOneURL(\'' + esc(p.wrapped_url) + '\')">Copy</button></td>' +
         '<td class="mono">' + esc(p.upstream) + '</td>' +
         '<td><span class="pill pill-blue" style="padding:2px 7px">' + esc(p.proto.toUpperCase()) + '</span></td>' +
         '<td>' + hb + '</td>' +
@@ -595,18 +686,17 @@ async function loadPorts() {
         '<td class="mono">' + p.active_conns + '</td>' +
         '<td class="mono">' + p.total_reqs + ' / <span style="color:var(--green)">' + p.sanitized_reqs + '</span> / <span style="color:var(--amber)">' + p.blocked_reqs + '</span> / <span style="color:var(--red)">' + p.error_reqs + '</span></td>' +
         '<td class="mono"><b style="color:var(--accent)">' + fmtDataMBGB(totB) + '</b></td>' +
-        '<td class="mono" style="color:var(--muted);font-size:12px">' + fmtBytes(p.bytes_up) + ' / ' + fmtBytes(p.bytes_down) + '</td>' +
         '<td style="color:var(--red);max-width:170px;overflow:hidden;text-overflow:ellipsis">' + esc(p.last_err) + '</td>' +
         '<td style="display:flex;gap:4px">' +
           '<button class="btn btn-sm ' + tgCls + '" onclick="entryAct(' + p.port + ',\'toggle\')">' + tgLabel + '</button>' +
-          '<button class="btn btn-sec btn-sm" onclick="openEditModal(' + p.port + ',\'' + esc(p.upstream_full) + '\',\'' + esc(p.group) + '\',\'' + esc(p.note) + '\')">Sửa</button>' +
+          '<button class="btn btn-sec btn-sm" onclick="openEditModal(' + p.port + ',\'' + esc(p.upstream_full) + '\',\'' + esc(p.group) + '\',\'' + esc(p.note) + '\',\'' + esc(p.proxy_user) + '\',\'' + esc(p.proxy_pass) + '\')">Sửa</button>' +
           '<button class="btn btn-sec btn-sm" onclick="testOnePort(' + p.port + ')">Test</button>' +
           '<button class="btn btn-sec btn-sm" onclick="resetPortData(' + p.port + ')">0MB</button>' +
           '<button class="btn btn-red btn-sm" onclick="entryAct(' + p.port + ',\'delete\')">Xóa</button>' +
         '</td>' +
         '</tr>';
     });
-    document.getElementById('portBody').innerHTML = html || '<tr><td colspan="14" style="text-align:center;color:var(--muted);padding:20px">Chưa có proxy nào. Hãy dán proxy vào khung trên và bấm "+ Thêm Vào Danh Sách"!</td></tr>';
+    document.getElementById('portBody').innerHTML = html || '<tr><td colspan="14" style="text-align:center;color:var(--muted);padding:20px">Chưa có proxy nào. Hãy dán proxy vào khung trên và bấm "+ Thêm Mới"!</td></tr>';
   } catch (e) {}
 }
 
@@ -616,14 +706,16 @@ async function entryAct(port, action) {
     method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({port: port, action: action})
   });
-  toast(action === 'delete' ? ('Đã xóa cổng :' + port) : ('Đã cập nhật trạng thái :' + port));
+  toast(action === 'delete' ? ('Đã xóa cổng :' + port) : ('Đã cập nhật :' + port));
   lastPortSig = ''; loadPorts(); loadOverview(); refreshOutputBox();
 }
 
-function openEditModal(port, upFull, grp, note) {
+function openEditModal(port, upFull, grp, note, pUser, pPass) {
   editTargetPort = port;
   document.getElementById('emPort').textContent = ':' + port;
   document.getElementById('emUp').value = upFull;
+  document.getElementById('emUser').value = pUser;
+  document.getElementById('emPass').value = pPass;
   document.getElementById('emGrp').value = grp;
   document.getElementById('emNote').value = note;
   document.getElementById('editModal').classList.remove('hidden');
@@ -635,6 +727,8 @@ async function saveEditEntry() {
     body: JSON.stringify({
       port: editTargetPort, action: 'edit',
       upstream_line: document.getElementById('emUp').value,
+      proxy_user: document.getElementById('emUser').value,
+      proxy_pass: document.getElementById('emPass').value,
       group: document.getElementById('emGrp').value,
       note: document.getElementById('emNote').value
     })
@@ -653,7 +747,8 @@ async function bulkAction(action) {
   }
   if (action === 'delete_selected' && !confirm('Xóa ' + ports.length + ' proxy đã chọn?')) return;
   if (action === 'delete_dead' && !confirm('Xóa toàn bộ proxy đang bị DIE?')) return;
-  if (action === 'reindex' && !confirm('Đánh lại số cổng liên tục từ Start Port? (Sẽ làm thay đổi số cổng của một số proxy đang chạy)')) return;
+  if (action === 'regen_auth' && !confirm('Tạo lại User & Password ngẫu nhiên mới cho ' + (ports.length > 0 ? (ports.length + ' cổng đã chọn') : 'TẤT CẢ các cổng') + '? (Cần cập nhật lại list mới lên ByteLixir!)')) return;
+  if (action === 'reindex' && !confirm('Đánh lại số cổng liên tục từ Start Port?')) return;
 
   var d = await (await api('/api/proxies/bulk', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -757,15 +852,10 @@ async function syncRulesNow() {
   loadOverview();
 }
 
-function analyzeInputBox() {
-  var lines = document.getElementById('proxiesBox').value.split(/\r?\n/), valid = 0;
-  lines.forEach(function(l) { l = l.trim(); if (l && l.charAt(0) !== '#' && /:\d{1,5}/.test(l)) valid++; });
-  document.getElementById('inCountBadge').textContent = valid + ' hợp lệ';
-}
 function uploadProxyFile(ev) {
   var f = ev.target.files[0]; if (!f) return;
   var rd = new FileReader();
-  rd.onload = function(e) { document.getElementById('proxiesBox').value = e.target.result || ''; analyzeInputBox(); toast('Đã nạp ' + f.name + '. Bấm "+ Thêm Vào Danh Sách"!'); };
+  rd.onload = function(e) { document.getElementById('proxiesBox').value = e.target.result || ''; runPreview(); toast('Đã nạp ' + f.name + ' và kiểm tra trùng xong!'); };
   rd.readAsText(f);
 }
 
@@ -786,23 +876,48 @@ async function loadConfig() {
   } catch (e) {}
 }
 
+function onExportFormatChange() {
+  var fmt = document.getElementById('expFormat').value;
+  document.getElementById('customTmplRow').classList.toggle('hidden', fmt !== 'custom');
+  refreshOutputBox();
+}
+
+function buildExportParams(dl) {
+  var fmt = document.getElementById('expFormat').value;
+  var qs = new URLSearchParams({
+    filter: document.getElementById('expFilter').value,
+    group: document.getElementById('expGroup').value,
+    proto: document.getElementById('expProto').value,
+    format: fmt
+  });
+  if (fmt === 'custom') qs.set('tmpl', document.getElementById('customTmpl').value);
+  if (dl) qs.set('dl', '1');
+  return qs.toString();
+}
+
 async function refreshOutputBox() {
   try {
-    var qs = new URLSearchParams({filter: document.getElementById('expFilter').value, group: document.getElementById('expGroup').value});
-    var txt = await (await api('/api/export?' + qs.toString())).text();
+    var fmt = document.getElementById('expFormat').value;
+    var txt = await (await api('/api/export?' + buildExportParams(false))).text();
     document.getElementById('outputBox').value = txt;
-    var cnt = txt.trim() === '' ? 0 : txt.trim().split('\n').length;
+    var cnt = 0;
+    if (txt.trim() !== '') {
+      if (fmt === 'json') { try { cnt = JSON.parse(txt).length; } catch(e){ cnt = 0; } }
+      else if (fmt === 'csv') { cnt = Math.max(0, txt.trim().split('\n').length - 1); }
+      else { cnt = txt.trim().split('\n').length; }
+    }
     document.getElementById('outCountBadge').textContent = cnt + ' sẵn sàng';
   } catch (e) {}
 }
+
 async function copyOutputBox() {
   var txt = document.getElementById('outputBox').value.trim();
   if (!txt) { toast('Chưa có proxy nào để copy!'); return; }
-  await copyTextSafe(txt); toast('Đã copy ' + txt.split('\n').length + ' proxy vào Clipboard!');
+  await copyTextSafe(txt);
+  toast('Đã copy danh sách đã bọc vào Clipboard!');
 }
 function downloadOutputBox() {
-  var qs = new URLSearchParams({filter: document.getElementById('expFilter').value, group: document.getElementById('expGroup').value, dl: '1'});
-  window.location = '/api/export?' + qs.toString();
+  window.location = '/api/export?' + buildExportParams(true);
 }
 
 async function saveProxies(mode) {
@@ -821,8 +936,8 @@ async function saveProxies(mode) {
     })
   })).json();
   if (mode === 'append') document.getElementById('proxiesBox').value = '';
-  analyzeInputBox();
-  toast('Đã thêm ' + d.added + ' proxy mới (Bỏ trùng: ' + (d.dupes||0) + ', Lỗi: ' + (d.invalid||0) + ') & đang tự test LIVE!');
+  runPreview();
+  toast('Đã thêm ' + d.added + ' proxy mới với User:Pass riêng! (Bỏ trùng: ' + ((d.dup_existing||0) + (d.dup_batch||0)) + ', Lỗi: ' + (d.invalid||0) + ')');
   lastPortSig = ''; loadOverview(); loadPorts(); refreshOutputBox();
 }
 

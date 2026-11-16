@@ -32,6 +32,8 @@ type ProxyEntry struct {
 	Group    string   `json:"group"`
 	Note     string   `json:"note"`
 	Enabled  bool     `json:"enabled"`
+	User     string   `json:"user"`
+	Pass     string   `json:"pass"`
 	Upstream Upstream `json:"upstream"`
 }
 
@@ -111,6 +113,15 @@ type parseStats struct {
 	Items   []Upstream
 	Dupes   int
 	Invalid int
+}
+
+type PreviewResult struct {
+	TotalLines   int        `json:"total_lines"`
+	ValidNew     []Upstream `json:"-"`
+	NewCount     int        `json:"new_count"`
+	DupBatch     []string   `json:"dup_batch"`
+	DupExisting  []string   `json:"dup_existing"`
+	InvalidLines []string   `json:"invalid_lines"`
 }
 
 const (
@@ -678,7 +689,6 @@ func startTelemetryTicker() {
 	}
 }
 
-// Auto-Check tang hinh: chi kiem tra cong im lang > 15 phut hoac chua test
 func startAutoCheckLoop() {
 	time.Sleep(15 * time.Second)
 	for {
@@ -707,11 +717,36 @@ func startAutoCheckLoop() {
 	}
 }
 
-// ==================== Tien ich Config, ProxyEntries & Reload ====================
+// ==================== Tien ich Random User/Pass & Check Trung Sieu Toc ====================
 func randomHex(n int) string {
 	b := make([]byte, n)
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+func randomAlphaNum(n int) string {
+	const chars = "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+	b := make([]byte, n)
+	rb := make([]byte, n)
+	_, _ = rand.Read(rb)
+	for i := 0; i < n; i++ {
+		b[i] = chars[int(rb[i])%len(chars)]
+	}
+	return string(b)
+}
+
+// Sinh user:pass ngau nhien doc nhat khong bao gio trung lap
+func genUniqueProxyCreds(usedUsers map[string]bool) (string, string) {
+	for i := 0; i < 64; i++ {
+		u := "px" + randomAlphaNum(8)
+		if !usedUsers[u] {
+			usedUsers[u] = true
+			return u, randomAlphaNum(14)
+		}
+	}
+	u := "px" + randomHex(6)
+	usedUsers[u] = true
+	return u, randomAlphaNum(14)
 }
 
 func hashPassword(salt, plain string) string {
@@ -817,12 +852,65 @@ func parseProxiesFlexible(raw, defaultProto string, dedup bool) parseStats {
 	return res
 }
 
+// Kiem tra trung lap sieu toc (<2ms cho 1000 dong) so voi danh sach dang chay
+func previewProxies(raw, defaultProto, mode string, dedup bool, existing []ProxyEntry) PreviewResult {
+	res := PreviewResult{
+		DupBatch:     []string{},
+		DupExisting:  []string{},
+		InvalidLines: []string{},
+	}
+
+	existingMap := make(map[string]int, len(existing))
+	if mode != "replace" {
+		for _, e := range existing {
+			existingMap[upstreamKey(e.Upstream)] = e.Port
+		}
+	}
+	batchSeen := make(map[string]bool)
+
+	sc := bufio.NewScanner(strings.NewReader(raw))
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		res.TotalLines++
+		u, ok := parseSingleUpstream(line, defaultProto)
+		if !ok {
+			res.InvalidLines = append(res.InvalidLines, line)
+			continue
+		}
+		k := upstreamKey(u)
+		if dedup {
+			if existPort, ok := existingMap[k]; ok {
+				res.DupExisting = append(res.DupExisting, fmt.Sprintf("%s (da co o :%d)", u.Addr(), existPort))
+				continue
+			}
+			if batchSeen[k] {
+				res.DupBatch = append(res.DupBatch, u.Addr())
+				continue
+			}
+			batchSeen[k] = true
+		}
+		res.ValidNew = append(res.ValidNew, u)
+	}
+	res.NewCount = len(res.ValidNew)
+	return res
+}
+
 func syncRawFromEntries(cfg *Config) {
 	var lines []string
 	for _, e := range cfg.ProxyEntries {
 		lines = append(lines, formatOneUpstream(e.Upstream))
 	}
 	cfg.ProxiesRaw = strings.Join(lines, "\n")
+}
+
+func entryCreds(e ProxyEntry, fallbackUser, fallbackPass string) (string, string) {
+	if e.User != "" && e.Pass != "" {
+		return e.User, e.Pass
+	}
+	return fallbackUser, fallbackPass
 }
 
 func reservePortsSysctl(entries []ProxyEntry, startPort int) {
@@ -848,7 +936,8 @@ func exportDiskFiles(cfg Config) {
 		if !e.Enabled {
 			continue
 		}
-		lines = append(lines, fmt.Sprintf("%s://%s:%s@%s:%d", e.Upstream.Proto, cfg.ProxyUser, cfg.ProxyPass, pubIP, e.Port))
+		u, p := entryCreds(e, cfg.ProxyUser, cfg.ProxyPass)
+		lines = append(lines, fmt.Sprintf("%s://%s:%s@%s:%d", e.Upstream.Proto, u, p, pubIP, e.Port))
 	}
 	_ = os.WriteFile("/root/wrapped_proxies.txt", []byte(strings.Join(lines, "\n")+"\n"), 0644)
 }
@@ -883,9 +972,10 @@ func applyConfigAndReload(cfg Config) (int, error) {
 
 	for _, port := range ports {
 		ent := desired[port]
+		eu, ep := entryCreds(ent, cfg.ProxyUser, cfg.ProxyPass)
 		if pr, exists := runners[port]; exists {
 			oldUp := pr.GetUpstream()
-			pr.SetMeta(ent.Upstream, ent.Group, ent.Note)
+			pr.SetMeta(ent.Upstream, ent.Group, ent.Note, eu, ep)
 			if oldUp.Addr() != ent.Upstream.Addr() || oldUp.Proto != ent.Upstream.Proto {
 				atomic.StoreInt64(&pr.BytesUp, 0)
 				atomic.StoreInt64(&pr.BytesDown, 0)
@@ -908,12 +998,14 @@ func applyConfigAndReload(cfg Config) (int, error) {
 			continue
 		}
 		pr := &PortRunner{
-			Port:     port,
-			upstream: ent.Upstream,
-			group:    ent.Group,
-			note:     ent.Note,
-			health:   "untested",
-			ln:       ln,
+			Port:      port,
+			upstream:  ent.Upstream,
+			group:     ent.Group,
+			note:      ent.Note,
+			proxyUser: eu,
+			proxyPass: ep,
+			health:    "untested",
+			ln:        ln,
 		}
 		runners[port] = pr
 		go func(runner *PortRunner) {
@@ -969,22 +1061,23 @@ func loadOrInitConfig(initAdminUser, initAdminPass string, initStartPort int) Co
 					c.AutoCheckMin = 5
 					changed = true
 				}
-				if c.ConfigVersion < 35 {
-					c.ConfigVersion = 35
-					c.BlockDangerousPorts = true
-					if c.AutoCheckMin == 0 {
-						c.AutoCheckMin = 5
+				if c.ConfigVersion < 40 {
+					if c.ConfigVersion < 35 {
+						c.BlockDangerousPorts = true
+						if c.BandwidthQuotaTB == 0 {
+							c.BandwidthQuotaTB = 10.0
+						}
 					}
-					if c.BandwidthQuotaTB == 0 {
-						c.BandwidthQuotaTB = 10.0
-					}
+					c.ConfigVersion = 40
 					changed = true
 				}
 				if len(c.ProxyEntries) == 0 && strings.TrimSpace(c.ProxiesRaw) != "" {
 					ps := parseProxiesFlexible(c.ProxiesRaw, c.DefaultUpProto, false)
+					usedU := make(map[string]bool)
 					for i, u := range ps.Items {
+						pu, pp := genUniqueProxyCreds(usedU)
 						c.ProxyEntries = append(c.ProxyEntries, ProxyEntry{
-							Port: c.StartPort + i, Group: "Mac dinh", Enabled: true, Upstream: u,
+							Port: c.StartPort + i, Group: "Mac dinh", Enabled: true, User: pu, Pass: pp, Upstream: u,
 						})
 					}
 					changed = true
@@ -1005,12 +1098,12 @@ func loadOrInitConfig(initAdminUser, initAdminPass string, initStartPort int) Co
 	}
 
 	c := Config{
-		ConfigVersion:       35,
+		ConfigVersion:       40,
 		AdminUser:           aUser,
 		AdminSalt:           aSalt,
 		AdminPassHash:       aHash,
-		ProxyUser:           "blx" + randomHex(3),
-		ProxyPass:           randomHex(8),
+		ProxyUser:           "px" + randomAlphaNum(6),
+		ProxyPass:           randomAlphaNum(14),
 		StartPort:           initStartPort,
 		DefaultUpProto:      "http",
 		AutoCheckMin:        5,
@@ -1066,6 +1159,13 @@ func runSelfTest() int {
 		fmt.Println("SELF-TEST FAIL: khong chan ipv6 probe")
 		return 1
 	}
+	used := map[string]bool{}
+	u1, p1 := genUniqueProxyCreds(used)
+	u2, p2 := genUniqueProxyCreds(used)
+	if u1 == "" || p1 == "" || u1 == u2 || p1 == p2 {
+		fmt.Println("SELF-TEST FAIL: loi sinh credentials ngau nhien")
+		return 1
+	}
 	fmt.Printf("SELF-TEST OK: Sanitize=%d | Block=%d | SavedProxies=%d\n", sanCnt, blkCnt, len(appCfg.ProxyEntries))
 	return 0
 }
@@ -1114,7 +1214,7 @@ func main() {
 	}()
 	go startWebDashboard(dashPort)
 
-	log.Printf("ProxyShield v3.5 Pro san sang! Public IP: %s | %d cong | Dashboard: http://%s:%d", pubIP, cnt, pubIP, dashPort)
+	log.Printf("ProxyShield v4.0 Pro san sang! Public IP: %s | %d cong | Dashboard: http://%s:%d", pubIP, cnt, pubIP, dashPort)
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
