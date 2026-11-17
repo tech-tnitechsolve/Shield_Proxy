@@ -121,6 +121,8 @@
       <span class="pill pill-amber mono">Auth: Riêng từng cổng</span>
     </div>
     <div style="display:flex;gap:8px;align-items:center">
+      <button id="updateBtn" class="btn btn-green btn-sm" onclick="startDashboardUpdate()">Cập nhật phiên bản</button>
+      <span id="updateStatus" class="pill mono">Cập nhật: ...</span>
       <button class="btn btn-sec btn-sm" onclick="togglePause()" id="pauseBtn">Tự động: 3s</button>
       <button class="btn btn-sec btn-sm" onclick="logout()">Đăng xuất</button>
     </div>
@@ -144,7 +146,7 @@
       </div>
 
       <div class="card">
-        <div class="stat-head"><span>Cổng &amp; Sức Khỏe Proxy</span><span id="kActive" class="pill pill-blue" style="padding:1px 7px;font-size:11px">LIVE: 0</span></div>
+        <div class="stat-head"><span>Cổng &amp; Sức Khỏe Proxy</span><span id="kActive" class="pill pill-blue" title="Kết nối client / upstream đang hoạt động / đang đàm phán" style="padding:1px 7px;font-size:11px">Client: 0 | Up: 0 | Mở: 0</span></div>
         <div id="kPorts" class="stat-val">0 cổng</div>
         <div class="meter"><div id="kAliveBar" class="meter-fill" style="width:0%;background:var(--green)"></div></div>
         <div class="stat-sub"><span id="kHealthSub" style="color:var(--green)">Sống: 0 | Chết: 0 | Tắt: 0</span></div>
@@ -195,7 +197,8 @@
               <input type="checkbox" id="chkDedup" checked style="width:auto" onchange="schedulePreview()"> Tự bỏ trùng
             </label>
           </div>
-          <textarea id="proxiesBox" rows="7" oninput="schedulePreview()" placeholder="Dán danh sách proxy mới vào đây (tự check trùng với dàn đang chạy):&#10;http://user:pass@198.12.102.93:40540&#10;socks5://user:pass@38.154.185.97:6370"></textarea>
+          <div style="font-size:12px;color:var(--muted);margin:-4px 0 8px">Giao thức được chọn riêng theo tiền tố từng dòng (`http://`, `https://`, `socks5://`). Lựa chọn HTTP/SOCKS5 phía trên chỉ áp dụng cho dòng không có tiền tố; hệ thống không tự đoán giao thức.</div>
+          <textarea id="proxiesBox" rows="7" oninput="schedulePreview()" placeholder="Dán danh sách proxy mới vào đây (tự check trùng với dàn đang chạy):&#10;http://user:pass@198.12.102.93:40540&#10;https://user:pass@host:port (HTTP proxy qua TLS)&#10;socks5://user:pass@38.154.185.97:6370"></textarea>
 
           <div class="preview-box">
             <div class="row" style="margin-bottom:0;gap:6px">
@@ -314,8 +317,8 @@
             <thead>
               <tr>
                 <th><input type="checkbox" id="chkAll" style="width:auto" onclick="toggleSelectAll(this)"></th>
-                <th>Cổng</th><th>Nhóm / Ghi chú</th><th>Auth Riêng (User:Pass)</th><th>Proxy Nguồn</th><th>Loại</th><th>Trạng thái</th>
-                <th>Ping</th><th>Exit IP</th><th>Live</th><th>Req / Ẩn / Chặn / Lỗi</th>
+                <th>Cổng</th><th>Nhóm / Ghi chú</th><th>Auth Riêng (User:Pass)</th><th>Proxy Nguồn</th><th>Loại</th><th>Giới hạn</th><th>Trạng thái</th>
+                <th>Ping</th><th>Exit IP</th><th>Client / Upstream / Đang mở</th><th>Req / Ẩn / Chặn / Lỗi</th>
                 <th>Tổng Data</th><th>Chi tiết lỗi</th><th>Thao tác IP</th>
               </tr>
             </thead>
@@ -421,6 +424,11 @@
       <div class="form-group"><label>Nhóm (Group)</label><input id="emGrp"></div>
       <div class="form-group"><label>Ghi chú</label><input id="emNote"></div>
     </div>
+    <div class="form-group">
+      <label>Giới hạn kết nối upstream đồng thời trên cổng này (0 = không giới hạn)</label>
+      <input id="emMaxUpstreamConns" type="number" min="0" max="10000" step="1" value="0">
+      <small style="color:var(--muted)">Đạt ngưỡng thì từ chối nhanh request mới, không xếp hàng. Giới hạn này áp dụng riêng cho cổng, không tự cộng gộp các cổng dùng chung tài khoản nguồn.</small>
+    </div>
     <div class="row" style="justify-content:space-between;margin-bottom:0">
       <button class="btn btn-sec btn-sm" onclick="regenOneAuthInModal()">Tạo Pass Ngẫu Nhiên</button>
       <div style="display:flex;gap:8px">
@@ -436,7 +444,7 @@
 <script>
 var paused = false, currentTab = 'proxies', portPage = 1, portTotal = 0;
 var lastPortSig = '', lastReqSig = '', selPorts = {}, lastAddedPorts = [], visiblePortOrder = [], lastChkIdx = -1;
-var editTargetPort = 0, searchTimer = null, previewTimer = null;
+var editTargetPort = 0, searchTimer = null, previewTimer = null, updateRunning = false, lastUpdatePoll = 0;
 
 function toast(msg) {
   var el = document.getElementById('toast');
@@ -571,6 +579,53 @@ async function doLogin() {
 }
 async function logout() { await fetch('/api/logout'); location.reload(); }
 
+async function loadUpdateStatus() {
+  lastUpdatePoll = Date.now();
+  try {
+    var r = await api('/api/update/status');
+    var d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Không đọc được trạng thái cập nhật.');
+    updateRunning = !!d.running;
+    document.getElementById('updateBtn').disabled = updateRunning;
+    var label = 'Cập nhật: Chưa chạy';
+    var cls = 'pill mono';
+    if (updateRunning || d.status === 'running') {
+      label = 'Cập nhật: Đang chạy';
+      cls = 'pill pill-amber mono';
+    } else if (d.status === 'success') {
+      label = 'Cập nhật: Thành công';
+      cls = 'pill pill-green mono';
+    } else if (d.status === 'failed') {
+      label = 'Cập nhật: Thất bại';
+      cls = 'pill pill-red mono';
+    }
+    var status = document.getElementById('updateStatus');
+    status.textContent = label;
+    status.title = d.message || '';
+    status.className = cls;
+  } catch (e) {
+    if (e.message === 'unauthorized') return;
+    document.getElementById('updateStatus').textContent = 'Cập nhật: Không khả dụng';
+    document.getElementById('updateStatus').title = e.message || '';
+    document.getElementById('updateBtn').disabled = true;
+  }
+}
+async function startDashboardUpdate() {
+  if (!confirm('Bắt đầu kiểm tra và cập nhật phiên bản mới? Proxy có thể ngắt kết nối ngắn khi dịch vụ khởi động lại.')) return;
+  var btn = document.getElementById('updateBtn');
+  btn.disabled = true;
+  try {
+    var r = await api('/api/update/start', {method: 'POST'});
+    var d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Không khởi động được cập nhật.');
+    toast(d.message || 'Đang cập nhật phiên bản...');
+    await loadUpdateStatus();
+  } catch (e) {
+    if (e.message !== 'unauthorized') toast(e.message || 'Không khởi động được cập nhật.');
+    btn.disabled = false;
+  }
+}
+
 function switchTab(name, btn) {
   currentTab = name;
   document.querySelectorAll('.tab').forEach(function(t){ t.classList.remove('active'); });
@@ -620,7 +675,9 @@ async function loadOverview() {
     document.getElementById('vFdsSub').textContent = 'FDs: ' + (v.open_fds || 0);
 
     var pRun = d.proxy_count || 0, pTot = d.proxy_total || 0, pAlive = d.alive_ports || 0, pDead = d.dead_ports || 0, pOff = d.disabled_count || 0;
-    document.getElementById('kActive').textContent = 'LIVE: ' + (d.active_conns || 0);
+    document.getElementById('kActive').textContent =
+      'Client: ' + (d.active_conns || 0) + ' | Up: ' + (d.active_upstream_conns || 0) +
+      ' | Mở: ' + (d.dialing_upstream_conns || 0);
     document.getElementById('kPorts').textContent = pRun + ' / ' + pTot + ' cổng';
     document.getElementById('kAliveBar').style.width = (pRun > 0 ? (pAlive / pRun) * 100 : 0).toFixed(1) + '%';
     document.getElementById('kHealthSub').textContent = 'Sống: ' + pAlive + ' | Chết: ' + pDead + ' | Tắt: ' + pOff;
@@ -746,24 +803,26 @@ async function loadPorts() {
         '<td><span class="pill pill-purple" style="padding:1px 7px">' + esc(p.group) + '</span>' + (p.note ? ' <span style="font-size:11.5px;color:var(--muted)">' + esc(p.note) + '</span>' : '') + '</td>' +
         '<td class="mono" style="font-size:12px"><span style="color:var(--amber)">' + esc(p.proxy_user) + '</span>:<span style="color:var(--muted)">' + esc(p.proxy_pass) + '</span> <button class="btn btn-sec btn-sm" style="padding:2px 6px;font-size:11px" onclick="copyOneURL(\'' + esc(copyUrl) + '\')">Copy</button></td>' +
         '<td class="mono">' + esc(p.upstream) + '</td>' +
-        '<td><span class="pill pill-blue" style="padding:2px 7px">' + esc(p.proto.toUpperCase()) + '</span></td>' +
+        '<td><span class="pill pill-blue" style="padding:2px 7px">' + esc((p.tls ? 'HTTPS' : p.proto).toUpperCase()) + '</span></td>' +
+        '<td class="mono">' + (p.max_upstream_conns > 0 ? p.max_upstream_conns : 'Không giới hạn') + '</td>' +
         '<td>' + hb + '</td>' +
         '<td class="mono">' + (p.latency_ms ? p.latency_ms + 'ms' : '-') + '</td>' +
         '<td class="mono" style="color:var(--accent)">' + esc(p.exit_ip || '-') + '</td>' +
-        '<td class="mono">' + p.active_conns + '</td>' +
+        '<td class="mono" title="Kết nối client / upstream đang hoạt động / đang đàm phán">' +
+          p.active_conns + ' / ' + p.upstream_active_conns + ' / ' + p.upstream_dialing_conns + '</td>' +
         '<td class="mono">' + p.total_reqs + ' / <span style="color:var(--green)">' + p.sanitized_reqs + '</span> / <span style="color:var(--amber)">' + p.blocked_reqs + '</span> / <span style="color:var(--red)">' + p.error_reqs + '</span></td>' +
         '<td class="mono"><b style="color:var(--accent)">' + fmtDataMBGB(totB) + '</b></td>' +
         '<td style="color:var(--red);max-width:170px;overflow:hidden;text-overflow:ellipsis">' + esc(p.last_err) + '</td>' +
         '<td style="display:flex;gap:4px">' +
           '<button class="btn btn-sm ' + tgCls + '" onclick="entryAct(' + p.port + ',\'toggle\')">' + tgLabel + '</button>' +
-          '<button class="btn btn-sec btn-sm" onclick="openEditModal(' + p.port + ',\'' + esc(p.upstream_full) + '\',\'' + esc(p.group) + '\',\'' + esc(p.note) + '\',\'' + esc(p.proxy_user) + '\',\'' + esc(p.proxy_pass) + '\')">Sửa</button>' +
+          '<button class="btn btn-sec btn-sm" onclick="openEditModal(' + p.port + ',\'' + esc(p.upstream_full) + '\',\'' + esc(p.group) + '\',\'' + esc(p.note) + '\',\'' + esc(p.proxy_user) + '\',\'' + esc(p.proxy_pass) + '\',' + (p.max_upstream_conns || 0) + ')">Sửa</button>' +
           '<button class="btn btn-sec btn-sm" onclick="testOnePort(' + p.port + ')">Test</button>' +
           '<button class="btn btn-sec btn-sm" onclick="resetPortData(' + p.port + ')">0MB</button>' +
           '<button class="btn btn-red btn-sm" onclick="entryAct(' + p.port + ',\'delete\')">Xóa</button>' +
         '</td>' +
         '</tr>';
     });
-    document.getElementById('portBody').innerHTML = html || '<tr><td colspan="14" style="text-align:center;color:var(--muted);padding:20px">Chưa có proxy nào. Hãy dán proxy vào khung trên và bấm "+ Thêm Mới"!</td></tr>';
+    document.getElementById('portBody').innerHTML = html || '<tr><td colspan="15" style="text-align:center;color:var(--muted);padding:20px">Chưa có proxy nào. Hãy dán proxy vào khung trên và bấm "+ Thêm Mới"!</td></tr>';
   } catch (e) {}
 }
 
@@ -777,7 +836,7 @@ async function entryAct(port, action) {
   lastPortSig = ''; loadPorts(); loadOverview(); refreshOutputBox();
 }
 
-function openEditModal(port, upFull, grp, note, pUser, pPass) {
+function openEditModal(port, upFull, grp, note, pUser, pPass, maxUpstreamConns) {
   editTargetPort = port;
   document.getElementById('emPort').textContent = ':' + port;
   document.getElementById('emUp').value = upFull;
@@ -785,10 +844,16 @@ function openEditModal(port, upFull, grp, note, pUser, pPass) {
   document.getElementById('emPass').value = pPass;
   document.getElementById('emGrp').value = grp;
   document.getElementById('emNote').value = note;
+  document.getElementById('emMaxUpstreamConns').value = maxUpstreamConns || 0;
   document.getElementById('editModal').classList.remove('hidden');
 }
 function closeEditModal() { document.getElementById('editModal').classList.add('hidden'); }
 async function saveEditEntry() {
+  var maxUpstreamConns = Number(document.getElementById('emMaxUpstreamConns').value);
+  if (!Number.isInteger(maxUpstreamConns) || maxUpstreamConns < 0 || maxUpstreamConns > 10000) {
+    toast('Giới hạn phải là số nguyên từ 0 đến 10000.');
+    return;
+  }
   var r = await api('/api/proxies/entry', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({
@@ -796,6 +861,7 @@ async function saveEditEntry() {
       upstream_line: document.getElementById('emUp').value,
       proxy_user: document.getElementById('emUser').value,
       proxy_pass: document.getElementById('emPass').value,
+      max_upstream_conns: maxUpstreamConns,
       group: document.getElementById('emGrp').value,
       note: document.getElementById('emNote').value
     })
@@ -854,7 +920,11 @@ async function testOnePort(port) {
     method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({port: port, mode: 'deep'})
   })).json();
-  toast(d.health === 'alive' ? ('Cổng :' + port + ' LIVE (' + d.latency_ms + 'ms) — Exit IP: ' + (d.exit_ip || 'OK')) : ('Cổng :' + port + ' DIE: ' + (d.error || 'Timeout')));
+  if (d.health === 'busy') {
+    toast('Bỏ qua test cổng :' + port + ' vì đã đạt giới hạn kết nối upstream.');
+  } else {
+    toast(d.health === 'alive' ? ('Cổng :' + port + ' LIVE (' + d.latency_ms + 'ms) — Exit IP: ' + (d.exit_ip || 'OK')) : ('Cổng :' + port + ' DIE: ' + (d.error || 'Timeout')));
+  }
   lastPortSig = ''; loadPorts(); loadOverview(); refreshOutputBox();
 }
 
@@ -1087,6 +1157,7 @@ async function initApp() {
     await loadOverview();
     document.getElementById('loginView').classList.add('hidden');
     document.getElementById('appView').classList.remove('hidden');
+    await loadUpdateStatus();
     await loadConfig();
     await loadPorts();
     await refreshOutputBox();
@@ -1098,6 +1169,7 @@ setInterval(function() {
     loadOverview();
     if (currentTab === 'proxies') { loadPorts(); }
     if (currentTab === 'requests') { loadRequests(); }
+    if (Date.now() - lastUpdatePoll > 15000) loadUpdateStatus();
   }
 }, 3000);
 

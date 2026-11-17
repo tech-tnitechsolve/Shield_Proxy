@@ -5,6 +5,7 @@ export PATH="/usr/local/go/bin:$PATH"
 # ==================== CAU HINH REPO MAC DINH ====================
 GITHUB_REPO="tech-tnitechsolve/Shield_Proxy"
 GITHUB_BRANCH="main"
+GITHUB_COMMIT=""
 # ================================================================
 
 DASH_PORT="8888"
@@ -16,6 +17,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --repo)        GITHUB_REPO="${2:-$GITHUB_REPO}"; shift 2 ;;
     --branch)      GITHUB_BRANCH="${2:-$GITHUB_BRANCH}"; shift 2 ;;
+    --commit)      GITHUB_COMMIT="${2:-}"; shift 2 ;;
     --dash-port)   DASH_PORT="${2:-8888}"; shift 2 ;;
     --start-port)  START_PORT="${2:-10001}"; shift 2 ;;
     --admin-user)  INIT_ADMIN_USER="${2:-admin}"; shift 2 ;;
@@ -110,8 +112,11 @@ if [[ -n "$SCRIPT_DIR" && -f "$SCRIPT_DIR/go.mod" && -f "$SCRIPT_DIR/main.go" &&
   echo "[*] Build tu thu muc local: $SCRIPT_DIR"
   cp -f "$SCRIPT_DIR"/*.go "$SCRIPT_DIR/go.mod" "$SCRIPT_DIR/ui.html" "$SCRIPT_DIR/sanitize_domains.txt" "$SCRIPT_DIR/block_domains.txt" "$TMP_SRC/"
 else
-  LATEST_SHA=$(curl -4 -fsSL --retry 2 -H "Accept: application/vnd.github.sha" -H "Cache-Control: no-cache" \
-    "https://api.github.com/repos/${GITHUB_REPO}/commits/${GITHUB_BRANCH}?t=$(date +%s)" 2>/dev/null || echo "")
+  LATEST_SHA="$GITHUB_COMMIT"
+  if [[ -z "$LATEST_SHA" ]]; then
+    LATEST_SHA=$(curl -4 -fsSL --retry 2 -H "Accept: application/vnd.github.sha" -H "Cache-Control: no-cache" \
+      "https://api.github.com/repos/${GITHUB_REPO}/commits/${GITHUB_BRANCH}?t=$(date +%s)" 2>/dev/null || echo "")
+  fi
 
   TMP_TAR="/tmp/proxyshield.tar.gz"
   TMP_EXT="/tmp/proxyshield-extract"
@@ -121,8 +126,8 @@ else
     echo "[*] Bat duoc Commit moi nhat: ${LATEST_SHA:0:7} (Bypass cache GitHub)"
     TAR_URL="https://github.com/${GITHUB_REPO}/archive/${LATEST_SHA}.tar.gz"
   else
-    echo "[*] Tai truc tiep nhanh ${GITHUB_BRANCH}..."
-    TAR_URL="https://github.com/${GITHUB_REPO}/archive/refs/heads/${GITHUB_BRANCH}.tar.gz?t=$(date +%s)"
+    echo "[XX] Khong lay duoc commit SHA hop le; tu choi build tu nhanh co the thay doi."
+    exit 1
   fi
 
   curl -4 -fsSL --retry 3 --retry-delay 2 -H "Cache-Control: no-cache" "$TAR_URL" -o "$TMP_TAR"
@@ -275,11 +280,48 @@ cat << EOF > /usr/local/bin/ps-update.tmp
 set -euo pipefail
 {
   [[ \$EUID -eq 0 ]] || { echo "[!] Chay bang quyen root: sudo ps-update"; exit 1; }
-  SHA=\$(curl -4 -sSL -H "Accept: application/vnd.github.sha" -H "Cache-Control: no-cache" "https://api.github.com/repos/${GITHUB_REPO}/commits/${GITHUB_BRANCH}?t=\$(date +%s)" 2>/dev/null || echo "")
-  REF="${GITHUB_BRANCH}"
-  [[ "\$SHA" =~ ^[0-9a-f]{40}\$ ]] && REF="\$SHA"
-  echo "[*] Dang kiem tra & cap nhat tu commit: \${REF}"
-  curl -4 -sSL -H "Cache-Control: no-cache" "https://raw.githubusercontent.com/${GITHUB_REPO}/\${REF}/install.sh?t=\$(date +%s)" | tr -d '\r' | bash -s -- --repo "${GITHUB_REPO}" --branch "${GITHUB_BRANCH}" --dash-port "${DASH_PORT}" --start-port "${START_PORT}"
+  STATUS_FILE="${DATA_DIR}/update-status.json"
+  STATUS_TMP="\${STATUS_FILE}.tmp"
+  write_status() {
+    printf '{"status":"%s","message":"%s","updated_at":"%s"}\n' "\$1" "\$2" "\$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "\$STATUS_TMP"
+    mv -f "\$STATUS_TMP" "\$STATUS_FILE"
+  }
+  run_update() {
+    local SHA SCRIPT_PATH
+    write_status "running" "Dang kiem tra phien ban moi..."
+    SHA=\$(curl -4 -fsSL --retry 2 -H "Accept: application/vnd.github.sha" -H "Cache-Control: no-cache" "https://api.github.com/repos/${GITHUB_REPO}/commits/${GITHUB_BRANCH}?t=\$(date +%s)") || {
+      write_status "failed" "Khong the lay commit SHA tu GitHub."
+      return 1
+    }
+    [[ "\$SHA" =~ ^[0-9a-f]{40}\$ ]] || {
+      write_status "failed" "GitHub tra ve commit SHA khong hop le."
+      return 1
+    }
+    write_status "running" "Dang tai va build commit \${SHA:0:7}..."
+    SCRIPT_PATH="${DATA_DIR}/install-update.sh"
+    curl -4 -fsSL --retry 3 -H "Cache-Control: no-cache" "https://raw.githubusercontent.com/${GITHUB_REPO}/\${SHA}/install.sh" -o "\$SCRIPT_PATH" || {
+      write_status "failed" "Khong tai duoc installer tai commit da ghim."
+      rm -f "\$SCRIPT_PATH"
+      return 1
+    }
+    if tr -d '\r' < "\$SCRIPT_PATH" | bash -s -- --repo "${GITHUB_REPO}" --branch "${GITHUB_BRANCH}" --commit "\$SHA" --dash-port "${DASH_PORT}" --start-port "${START_PORT}"; then
+      local RESULT=0
+    else
+      local RESULT=\$?
+    fi
+    rm -f "\$SCRIPT_PATH"
+    if (( RESULT == 0 )); then
+      write_status "success" "Cap nhat va kiem tra dich vu thanh cong."
+    else
+      write_status "failed" "Cap nhat that bai; installer da bao toan hoac rollback binary."
+      return "\$RESULT"
+    fi
+  }
+  if [[ "\${1:-}" == "--dashboard" ]]; then
+    mkdir -p "${DATA_DIR}"
+    exec >> "${DATA_DIR}/update.log" 2>&1
+  fi
+  run_update
   exit 0
 }
 EOF

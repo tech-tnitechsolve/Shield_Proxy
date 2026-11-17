@@ -28,13 +28,14 @@ import (
 )
 
 type ProxyEntry struct {
-	Port     int      `json:"port"`
-	Group    string   `json:"group"`
-	Note     string   `json:"note"`
-	Enabled  bool     `json:"enabled"`
-	User     string   `json:"user"`
-	Pass     string   `json:"pass"`
-	Upstream Upstream `json:"upstream"`
+	Port             int      `json:"port"`
+	Group            string   `json:"group"`
+	Note             string   `json:"note"`
+	Enabled          bool     `json:"enabled"`
+	User             string   `json:"user"`
+	Pass             string   `json:"pass"`
+	MaxUpstreamConns int64    `json:"max_upstream_conns,omitempty"`
+	Upstream         Upstream `json:"upstream"`
 }
 
 type Config struct {
@@ -597,10 +598,18 @@ func startTelemetryTicker() {
 		runnersMu.RUnlock()
 
 		dReqs, dUp, dDn, dErr := curReqs-prevReqs, curUp-prevUp, curDn-prevDn, curErr-prevErr
-		if dReqs < 0 { dReqs = 0 }
-		if dUp < 0 { dUp = 0 }
-		if dDn < 0 { dDn = 0 }
-		if dErr < 0 { dErr = 0 }
+		if dReqs < 0 {
+			dReqs = 0
+		}
+		if dUp < 0 {
+			dUp = 0
+		}
+		if dDn < 0 {
+			dDn = 0
+		}
+		if dErr < 0 {
+			dErr = 0
+		}
 		prevReqs, prevUp, prevDn, prevErr = curReqs, curUp, curDn, curErr
 
 		pt := TimePoint{
@@ -632,8 +641,12 @@ func startTelemetryTicker() {
 
 		curNICRx, curNICTx := readNICBytes()
 		var dNICRx, dNICTx uint64
-		if curNICRx >= prevNICRx { dNICRx = curNICRx - prevNICRx }
-		if curNICTx >= prevNICTx { dNICTx = curNICTx - prevNICTx }
+		if curNICRx >= prevNICRx {
+			dNICRx = curNICRx - prevNICRx
+		}
+		if curNICTx >= prevNICTx {
+			dNICTx = curNICTx - prevNICTx
+		}
 		prevNICRx, prevNICTx = curNICRx, curNICTx
 
 		curMonth := time.Now().Format("2006-01")
@@ -760,14 +773,18 @@ func verifyPassword(salt, hash, plain string) bool {
 }
 
 func upstreamKey(u Upstream) string {
-	return u.Proto + "|" + u.Host + "|" + u.PortStr + "|" + u.User + "|" + u.Pass
+	return u.Proto + "|" + u.Host + "|" + u.PortStr + "|" + u.User + "|" + u.Pass + "|" + strconv.FormatBool(u.TLS)
 }
 
 func formatOneUpstream(u Upstream) string {
-	if u.User != "" || u.Pass != "" {
-		return fmt.Sprintf("%s://%s:%s@%s:%s", u.Proto, u.User, u.Pass, u.Host, u.PortStr)
+	scheme := u.Proto
+	if u.TLS && u.Proto == "http" {
+		scheme = "https"
 	}
-	return fmt.Sprintf("%s://%s:%s", u.Proto, u.Host, u.PortStr)
+	if u.User != "" || u.Pass != "" {
+		return fmt.Sprintf("%s://%s:%s@%s:%s", scheme, u.User, u.Pass, u.Host, u.PortStr)
+	}
+	return fmt.Sprintf("%s://%s:%s", scheme, u.Host, u.PortStr)
 }
 
 func parseSingleUpstream(line, defaultProto string) (Upstream, bool) {
@@ -779,11 +796,15 @@ func parseSingleUpstream(line, defaultProto string) (Upstream, bool) {
 		return Upstream{}, false
 	}
 	proto := defaultProto
+	useTLS := false
 	body := line
 	if idx := strings.Index(line, "://"); idx != -1 {
 		scheme := strings.ToLower(line[:idx])
 		body = line[idx+3:]
-		if strings.HasPrefix(scheme, "http") {
+		if scheme == "https" {
+			proto = "http"
+			useTLS = true
+		} else if strings.HasPrefix(scheme, "http") {
 			proto = "http"
 		} else {
 			proto = "socks5"
@@ -821,7 +842,7 @@ func parseSingleUpstream(line, defaultProto string) (Upstream, bool) {
 		return Upstream{}, false
 	}
 
-	return Upstream{Proto: proto, Host: host, PortStr: portStr, User: user, Pass: pass}, true
+	return Upstream{Proto: proto, Host: host, PortStr: portStr, User: user, Pass: pass, TLS: useTLS}, true
 }
 
 func parseProxiesFlexible(raw, defaultProto string, dedup bool) parseStats {
@@ -943,6 +964,12 @@ func exportDiskFiles(cfg Config) {
 }
 
 func applyConfigAndReload(cfg Config) (int, error) {
+	for _, entry := range cfg.ProxyEntries {
+		if entry.MaxUpstreamConns < 0 || entry.MaxUpstreamConns > 10000 {
+			return 0, fmt.Errorf("gioi han ket noi upstream khong hop le tai cong %d", entry.Port)
+		}
+	}
+
 	rebuildAllRules(cfg.SanitizeKeywords, cfg.BlockKeywords, cfg.BlockDangerousPorts)
 	reservePortsSysctl(cfg.ProxyEntries, cfg.StartPort)
 
@@ -975,8 +1002,8 @@ func applyConfigAndReload(cfg Config) (int, error) {
 		eu, ep := entryCreds(ent, cfg.ProxyUser, cfg.ProxyPass)
 		if pr, exists := runners[port]; exists {
 			oldUp := pr.GetUpstream()
-			pr.SetMeta(ent.Upstream, ent.Group, ent.Note, eu, ep)
-			if oldUp.Addr() != ent.Upstream.Addr() || oldUp.Proto != ent.Upstream.Proto {
+			pr.SetMeta(ent.Upstream, ent.Group, ent.Note, eu, ep, ent.MaxUpstreamConns)
+			if oldUp.Addr() != ent.Upstream.Addr() || oldUp.Proto != ent.Upstream.Proto || oldUp.TLS != ent.Upstream.TLS {
 				atomic.StoreInt64(&pr.BytesUp, 0)
 				atomic.StoreInt64(&pr.BytesDown, 0)
 				atomic.StoreInt64(&pr.TotalReqs, 0)
@@ -998,14 +1025,15 @@ func applyConfigAndReload(cfg Config) (int, error) {
 			continue
 		}
 		pr := &PortRunner{
-			Port:      port,
-			upstream:  ent.Upstream,
-			group:     ent.Group,
-			note:      ent.Note,
-			proxyUser: eu,
-			proxyPass: ep,
-			health:    "untested",
-			ln:        ln,
+			Port:             port,
+			upstream:         ent.Upstream,
+			group:            ent.Group,
+			note:             ent.Note,
+			proxyUser:        eu,
+			proxyPass:        ep,
+			maxUpstreamConns: ent.MaxUpstreamConns,
+			health:           "untested",
+			ln:               ln,
 		}
 		runners[port] = pr
 		go func(runner *PortRunner) {

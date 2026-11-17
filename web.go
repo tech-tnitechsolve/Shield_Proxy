@@ -6,11 +6,15 @@ import (
 	_ "embed"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net"
 	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"strconv"
@@ -34,6 +38,8 @@ var (
 
 	rlMu      sync.Mutex
 	loginFail = make(map[string][]time.Time)
+
+	updateStartMu sync.Mutex
 )
 
 func startSessionCleaner() {
@@ -190,6 +196,97 @@ func apiLogout(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+type updaterStatus struct {
+	Status    string `json:"status"`
+	Message   string `json:"message"`
+	UpdatedAt string `json:"updated_at"`
+}
+
+func dashboardUpdateActive() (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	err := exec.CommandContext(ctx, "systemctl", "is-active", "--quiet", "proxy-shield-dashboard-update.service").Run()
+	if err == nil {
+		return true, nil
+	}
+	if ctx.Err() != nil {
+		return false, fmt.Errorf("systemctl updater status check timed out: %w", ctx.Err())
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return false, nil
+	}
+	return false, fmt.Errorf("check updater service: %w", err)
+}
+
+func apiUpdateStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	running, err := dashboardUpdateActive()
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "Khong the kiem tra systemd updater."})
+		return
+	}
+	status := updaterStatus{Status: "idle", Message: "Chua co cap nhat nao dang chay."}
+	raw, err := os.ReadFile(filepath.Join(dataDir, "update-status.json"))
+	if err != nil && !os.IsNotExist(err) {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Khong doc duoc trang thai cap nhat."})
+		return
+	}
+	if err == nil {
+		if err := json.Unmarshal(raw, &status); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Trang thai cap nhat khong hop le."})
+			return
+		}
+		if status.Status == "" {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Trang thai cap nhat bi thieu."})
+			return
+		}
+	}
+	if running {
+		status.Status = "running"
+	} else if status.Status == "running" {
+		status.Status = "failed"
+		status.Message = "Updater da dung bat thuong; co the thu chay lai."
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":     status.Status,
+		"message":    status.Message,
+		"updated_at": status.UpdatedAt,
+		"running":    running,
+	})
+}
+
+func apiUpdateStart(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	updateStartMu.Lock()
+	defer updateStartMu.Unlock()
+
+	running, err := dashboardUpdateActive()
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "Khong the kiem tra systemd updater."})
+		return
+	}
+	if running {
+		writeJSON(w, http.StatusAccepted, map[string]string{"status": "running", "message": "Cap nhat dang chay."})
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	output, err := exec.CommandContext(ctx, "systemd-run", "--quiet", "--collect", "--unit=proxy-shield-dashboard-update", "/usr/local/bin/ps-update", "--dashboard").CombinedOutput()
+	if err != nil {
+		log.Printf("start dashboard updater failed: %v: %s", err, strings.TrimSpace(string(output)))
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "Khong khoi dong duoc updater systemd. Hay kiem tra dich vu systemd va /usr/local/bin/ps-update."})
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "running", "message": "Da khoi dong cap nhat trong tien trinh systemd rieng."})
+}
+
 // ==================== Async Background Scanner (Stealth & 1-CPU Safe) ====================
 var scanState struct {
 	mu      sync.Mutex
@@ -216,8 +313,13 @@ func probeRunner(ctx context.Context, pr *PortRunner, mode string) (string, int6
 	ctxDial, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()
 
-	conn, err := dialUpstreamCtx(ctxDial, up, targetHost, targetPort)
+	conn, err := trackUpstreamDial(pr, func() (net.Conn, error) {
+		return dialUpstreamCtx(ctxDial, up, targetHost, targetPort)
+	})
 	if err != nil {
+		if errors.Is(err, errUpstreamLimit) {
+			return "busy", 0, "", err.Error()
+		}
 		lat := time.Since(t0).Milliseconds()
 		pr.SetHealth("dead", lat, "", err.Error())
 		return "dead", lat, "", err.Error()
@@ -321,7 +423,7 @@ func triggerScan(mode string, onlyPorts []int) int {
 				st, _, _, _ := probeRunner(ctx, runner, mode)
 				if st == "alive" {
 					atomic.AddInt64(&scanState.Alive, 1)
-				} else {
+				} else if st == "dead" {
 					atomic.AddInt64(&scanState.Dead, 1)
 				}
 				atomic.AddInt64(&scanState.Done, 1)
@@ -473,13 +575,16 @@ func apiOverview(w http.ResponseWriter, r *http.Request) {
 	}
 	sort.Strings(groups)
 
-	var totalConns, totalReqs, totalSanitized, totalBlocked, totalErrors, totalUp, totalDown int64
+	var totalConns, totalUpstreamConns, totalDialingConns int64
+	var totalReqs, totalSanitized, totalBlocked, totalErrors, totalUp, totalDown int64
 	var alivePorts, deadPorts, runningPorts int
 
 	runnersMu.RLock()
 	runningPorts = len(runners)
 	for _, pr := range runners {
 		totalConns += atomic.LoadInt64(&pr.ActiveConns)
+		totalUpstreamConns += atomic.LoadInt64(&pr.UpstreamConns)
+		totalDialingConns += atomic.LoadInt64(&pr.DialingConns)
 		totalReqs += atomic.LoadInt64(&pr.TotalReqs)
 		totalSanitized += atomic.LoadInt64(&pr.SanitizedReqs)
 		totalBlocked += atomic.LoadInt64(&pr.BlockedReqs)
@@ -516,35 +621,37 @@ func apiOverview(w http.ResponseWriter, r *http.Request) {
 	sanCnt, blkCnt, rulesSync := getRulesStatus()
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"public_ip":          pubIP,
-		"uptime_sec":         int64(time.Since(startTime).Seconds()),
-		"goroutines":         runtime.NumGoroutine(),
-		"app_mem_mb":         readAppMemMB(),
-		"dns_cache_cnt":      getDNSCacheCount(),
-		"rules_sanitize_cnt": sanCnt,
-		"rules_block_cnt":    blkCnt,
-		"rules_last_sync":    rulesSync,
-		"vps":                vps,
-		"quota_tb":           quotaTB,
-		"quota_pct":          quotaPct,
-		"auto_check_min":     autoMin,
-		"proxy_total":        totalConfigured,
-		"proxy_count":        runningPorts,
-		"disabled_count":     disabledCount,
-		"alive_ports":        alivePorts,
-		"dead_ports":         deadPorts,
-		"groups":             groups,
-		"active_conns":       totalConns,
-		"total_reqs":         totalReqs,
-		"total_sanitized":    totalSanitized,
-		"total_blocked":      totalBlocked,
-		"total_errors":       totalErrors,
-		"total_bytes_up":     totalUp,
-		"total_bytes_dn":     totalDown,
-		"proxy_user":         pUser,
-		"proxy_pass":         pPass,
-		"start_port":         sPort,
-		"timeseries":         tsCopy,
+		"public_ip":              pubIP,
+		"uptime_sec":             int64(time.Since(startTime).Seconds()),
+		"goroutines":             runtime.NumGoroutine(),
+		"app_mem_mb":             readAppMemMB(),
+		"dns_cache_cnt":          getDNSCacheCount(),
+		"rules_sanitize_cnt":     sanCnt,
+		"rules_block_cnt":        blkCnt,
+		"rules_last_sync":        rulesSync,
+		"vps":                    vps,
+		"quota_tb":               quotaTB,
+		"quota_pct":              quotaPct,
+		"auto_check_min":         autoMin,
+		"proxy_total":            totalConfigured,
+		"proxy_count":            runningPorts,
+		"disabled_count":         disabledCount,
+		"alive_ports":            alivePorts,
+		"dead_ports":             deadPorts,
+		"groups":                 groups,
+		"active_conns":           totalConns,
+		"active_upstream_conns":  totalUpstreamConns,
+		"dialing_upstream_conns": totalDialingConns,
+		"total_reqs":             totalReqs,
+		"total_sanitized":        totalSanitized,
+		"total_blocked":          totalBlocked,
+		"total_errors":           totalErrors,
+		"total_bytes_up":         totalUp,
+		"total_bytes_dn":         totalDown,
+		"proxy_user":             pUser,
+		"proxy_pass":             pPass,
+		"start_port":             sPort,
+		"timeseries":             tsCopy,
 		"scan": map[string]interface{}{
 			"running": atomic.LoadInt32(&scanState.Running) == 1,
 			"total":   atomic.LoadInt64(&scanState.Total),
@@ -578,27 +685,31 @@ func apiPorts(w http.ResponseWriter, r *http.Request) {
 	cfgMu.RUnlock()
 
 	type portItem struct {
-		Port          int    `json:"port"`
-		Group         string `json:"group"`
-		Note          string `json:"note"`
-		Enabled       bool   `json:"enabled"`
-		ProxyUser     string `json:"proxy_user"`
-		ProxyPass     string `json:"proxy_pass"`
-		WrappedURL    string `json:"wrapped_url"`
-		Upstream      string `json:"upstream"`
-		UpstreamFull  string `json:"upstream_full"`
-		Proto         string `json:"proto"`
-		ActiveConns   int64  `json:"active_conns"`
-		TotalReqs     int64  `json:"total_reqs"`
-		SanitizedReqs int64  `json:"sanitized_reqs"`
-		BlockedReqs   int64  `json:"blocked_reqs"`
-		ErrorReqs     int64  `json:"error_reqs"`
-		BytesUp       int64  `json:"bytes_up"`
-		BytesDown     int64  `json:"bytes_down"`
-		Health        string `json:"health"`
-		LatencyMs     int64  `json:"latency_ms"`
-		ExitIP        string `json:"exit_ip"`
-		LastErr       string `json:"last_err"`
+		Port             int    `json:"port"`
+		Group            string `json:"group"`
+		Note             string `json:"note"`
+		Enabled          bool   `json:"enabled"`
+		ProxyUser        string `json:"proxy_user"`
+		ProxyPass        string `json:"proxy_pass"`
+		WrappedURL       string `json:"wrapped_url"`
+		Upstream         string `json:"upstream"`
+		UpstreamFull     string `json:"upstream_full"`
+		Proto            string `json:"proto"`
+		TLS              bool   `json:"tls"`
+		MaxUpstreamConns int64  `json:"max_upstream_conns"`
+		ActiveConns      int64  `json:"active_conns"`
+		UpstreamConns    int64  `json:"upstream_active_conns"`
+		DialingConns     int64  `json:"upstream_dialing_conns"`
+		TotalReqs        int64  `json:"total_reqs"`
+		SanitizedReqs    int64  `json:"sanitized_reqs"`
+		BlockedReqs      int64  `json:"blocked_reqs"`
+		ErrorReqs        int64  `json:"error_reqs"`
+		BytesUp          int64  `json:"bytes_up"`
+		BytesDown        int64  `json:"bytes_down"`
+		Health           string `json:"health"`
+		LatencyMs        int64  `json:"latency_ms"`
+		ExitIP           string `json:"exit_ip"`
+		LastErr          string `json:"last_err"`
 	}
 
 	matched := make([]portItem, 0, len(entries))
@@ -614,22 +725,26 @@ func apiPorts(w http.ResponseWriter, r *http.Request) {
 
 		eu, ep := entryCreds(ent, fallbackU, fallbackP)
 		item := portItem{
-			Port:         ent.Port,
-			Group:        grp,
-			Note:         ent.Note,
-			Enabled:      ent.Enabled,
-			ProxyUser:    eu,
-			ProxyPass:    ep,
-			WrappedURL:   fmt.Sprintf("%s://%s:%s@%s:%d", ent.Upstream.Proto, eu, ep, pubIP, ent.Port),
-			Upstream:     ent.Upstream.Addr(),
-			UpstreamFull: formatOneUpstream(ent.Upstream),
-			Proto:        ent.Upstream.Proto,
-			Health:       "disabled",
+			Port:             ent.Port,
+			Group:            grp,
+			Note:             ent.Note,
+			Enabled:          ent.Enabled,
+			ProxyUser:        eu,
+			ProxyPass:        ep,
+			WrappedURL:       fmt.Sprintf("%s://%s:%s@%s:%d", ent.Upstream.Proto, eu, ep, pubIP, ent.Port),
+			Upstream:         ent.Upstream.Addr(),
+			UpstreamFull:     formatOneUpstream(ent.Upstream),
+			Proto:            ent.Upstream.Proto,
+			TLS:              ent.Upstream.TLS,
+			MaxUpstreamConns: ent.MaxUpstreamConns,
+			Health:           "disabled",
 		}
 
 		if ent.Enabled {
 			if pr, ok := runners[ent.Port]; ok {
 				item.ActiveConns = atomic.LoadInt64(&pr.ActiveConns)
+				item.UpstreamConns = atomic.LoadInt64(&pr.UpstreamConns)
+				item.DialingConns = atomic.LoadInt64(&pr.DialingConns)
 				item.TotalReqs = atomic.LoadInt64(&pr.TotalReqs)
 				item.SanitizedReqs = atomic.LoadInt64(&pr.SanitizedReqs)
 				item.BlockedReqs = atomic.LoadInt64(&pr.BlockedReqs)
@@ -1073,16 +1188,21 @@ func apiProxyEntryAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Port         int    `json:"port"`
-		Action       string `json:"action"`
-		UpstreamLine string `json:"upstream_line"`
-		Group        string `json:"group"`
-		Note         string `json:"note"`
-		ProxyUser    string `json:"proxy_user"`
-		ProxyPass    string `json:"proxy_pass"`
+		Port             int    `json:"port"`
+		Action           string `json:"action"`
+		UpstreamLine     string `json:"upstream_line"`
+		Group            string `json:"group"`
+		Note             string `json:"note"`
+		ProxyUser        string `json:"proxy_user"`
+		ProxyPass        string `json:"proxy_pass"`
+		MaxUpstreamConns *int64 `json:"max_upstream_conns"`
 	}
 	if json.NewDecoder(r.Body).Decode(&body) != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+	if body.MaxUpstreamConns != nil && (*body.MaxUpstreamConns < 0 || *body.MaxUpstreamConns > 10000) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Gioi han ket noi phai tu 0 den 10000 (0 = khong gioi han)."})
 		return
 	}
 
@@ -1136,6 +1256,9 @@ func apiProxyEntryAction(w http.ResponseWriter, r *http.Request) {
 			if strings.TrimSpace(body.ProxyUser) != "" && strings.TrimSpace(body.ProxyPass) != "" {
 				e.User = strings.TrimSpace(body.ProxyUser)
 				e.Pass = strings.TrimSpace(body.ProxyPass)
+			}
+			if body.MaxUpstreamConns != nil {
+				e.MaxUpstreamConns = *body.MaxUpstreamConns
 			}
 			outEntries = append(outEntries, e)
 		default:
@@ -1524,6 +1647,14 @@ func apiRestoreConfig(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 	}
+	for _, entry := range c.ProxyEntries {
+		if entry.MaxUpstreamConns < 0 || entry.MaxUpstreamConns > 10000 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error": fmt.Sprintf("Gioi han ket noi upstream khong hop le tai cong %d.", entry.Port),
+			})
+			return
+		}
+	}
 
 	cfgMu.Lock()
 	if c.AdminUser == "" || c.AdminPassHash == "" {
@@ -1552,6 +1683,8 @@ func startWebDashboard(port int) {
 	mux.HandleFunc("/api/auth/status", apiAuthStatus)
 	mux.HandleFunc("/api/login", apiLogin)
 	mux.HandleFunc("/api/logout", apiLogout)
+	mux.HandleFunc("/api/update/status", requireAuth(apiUpdateStatus))
+	mux.HandleFunc("/api/update/start", requireAuth(apiUpdateStart))
 	mux.HandleFunc("/api/overview", requireAuth(apiOverview))
 	mux.HandleFunc("/api/ports", requireAuth(apiPorts))
 	mux.HandleFunc("/api/ports/test", requireAuth(apiTestSinglePort))

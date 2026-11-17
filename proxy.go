@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/subtle"
+	"crypto/tls"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -24,6 +25,7 @@ type Upstream struct {
 	PortStr string `json:"port"`
 	User    string `json:"user,omitempty"`
 	Pass    string `json:"pass,omitempty"`
+	TLS     bool   `json:"tls,omitempty"`
 }
 
 func (u Upstream) Addr() string {
@@ -32,6 +34,8 @@ func (u Upstream) Addr() string {
 
 type PortRunner struct {
 	ActiveConns   int64
+	UpstreamConns int64
+	DialingConns  int64
 	TotalReqs     int64
 	SanitizedReqs int64
 	BlockedReqs   int64
@@ -41,19 +45,22 @@ type PortRunner struct {
 	LastOKUnix    int64
 	LastErrUnix   int64
 
-	Port      int
-	mu        sync.RWMutex
-	upstream  Upstream
-	group     string
-	note      string
-	proxyUser string
-	proxyPass string
-	lastErr   string
-	health    string // "untested", "alive", "dead"
-	latency   int64
-	exitIP    string
-	ln        net.Listener
-	closed    int32
+	Port             int
+	mu               sync.RWMutex
+	limitMu          sync.Mutex
+	maxUpstreamConns int64
+	upstreamSlots    int64
+	upstream         Upstream
+	group            string
+	note             string
+	proxyUser        string
+	proxyPass        string
+	lastErr          string
+	health           string // "untested", "alive", "dead"
+	latency          int64
+	exitIP           string
+	ln               net.Listener
+	closed           int32
 }
 
 func (pr *PortRunner) GetUpstream() Upstream {
@@ -72,7 +79,7 @@ func (pr *PortRunner) GetClientCreds() ([]byte, []byte) {
 	return getProxyCreds()
 }
 
-func (pr *PortRunner) SetMeta(u Upstream, group, note, pUser, pPass string) {
+func (pr *PortRunner) SetMeta(u Upstream, group, note, pUser, pPass string, maxUpstreamConns int64) {
 	pr.mu.Lock()
 	pr.upstream = u
 	pr.group = group
@@ -80,6 +87,27 @@ func (pr *PortRunner) SetMeta(u Upstream, group, note, pUser, pPass string) {
 	pr.proxyUser = pUser
 	pr.proxyPass = pPass
 	pr.mu.Unlock()
+	pr.limitMu.Lock()
+	pr.maxUpstreamConns = maxUpstreamConns
+	pr.limitMu.Unlock()
+}
+
+func (pr *PortRunner) reserveUpstreamSlot() bool {
+	pr.limitMu.Lock()
+	defer pr.limitMu.Unlock()
+	if pr.maxUpstreamConns > 0 && pr.upstreamSlots >= pr.maxUpstreamConns {
+		return false
+	}
+	pr.upstreamSlots++
+	return true
+}
+
+func (pr *PortRunner) releaseUpstreamSlot() {
+	pr.limitMu.Lock()
+	if pr.upstreamSlots > 0 {
+		pr.upstreamSlots--
+	}
+	pr.limitMu.Unlock()
 }
 
 func (pr *PortRunner) SetError(msg string) {
@@ -145,6 +173,112 @@ func (cr *countReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
+type trackedConn struct {
+	net.Conn
+	pr   *PortRunner
+	once sync.Once
+}
+
+func (c *trackedConn) Close() error {
+	err := c.Conn.Close()
+	c.once.Do(func() {
+		atomic.AddInt64(&c.pr.UpstreamConns, -1)
+		c.pr.releaseUpstreamSlot()
+	})
+	return err
+}
+
+func (c *trackedConn) CloseWrite() error {
+	if cw, ok := c.Conn.(interface{ CloseWrite() error }); ok {
+		return cw.CloseWrite()
+	}
+	return errors.New("upstream connection does not support half-close")
+}
+
+type bufferedConn struct {
+	net.Conn
+	reader *bufio.Reader
+}
+
+func (c *bufferedConn) Read(p []byte) (int, error) {
+	return c.reader.Read(p)
+}
+
+func (c *bufferedConn) CloseWrite() error {
+	if cw, ok := c.Conn.(interface{ CloseWrite() error }); ok {
+		return cw.CloseWrite()
+	}
+	return errors.New("upstream connection does not support half-close")
+}
+
+var errUpstreamLimit = errors.New("upstream connection limit reached")
+
+func trackUpstreamDial(pr *PortRunner, dial func() (net.Conn, error)) (net.Conn, error) {
+	if !pr.reserveUpstreamSlot() {
+		return nil, errUpstreamLimit
+	}
+	atomic.AddInt64(&pr.DialingConns, 1)
+	conn, err := dial()
+	atomic.AddInt64(&pr.DialingConns, -1)
+	if err != nil {
+		pr.releaseUpstreamSlot()
+		return nil, err
+	}
+	atomic.AddInt64(&pr.UpstreamConns, 1)
+	return &trackedConn{Conn: conn, pr: pr}, nil
+}
+
+func writeUpstreamDialError(conn net.Conn, err error) {
+	status := "502 Bad Gateway"
+	retryAfter := ""
+	if errors.Is(err, errUpstreamLimit) {
+		status = "503 Service Unavailable"
+		retryAfter = "Retry-After: 1\r\n"
+	}
+	_, _ = io.WriteString(conn, "HTTP/1.1 "+status+"\r\n"+retryAfter+"Connection: close\r\n\r\n")
+}
+
+func dialUpstreamTransport(ctx context.Context, up Upstream) (net.Conn, error) {
+	dialer := &net.Dialer{Timeout: 15 * time.Second}
+	conn, err := dialer.DialContext(ctx, "tcp4", up.Addr())
+	if err != nil {
+		return nil, fmt.Errorf("upstream TCP connect: %w", err)
+	}
+	tuneTCP(conn)
+	if !up.TLS {
+		return conn, nil
+	}
+
+	deadline := time.Now().Add(15 * time.Second)
+	if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
+		deadline = ctxDeadline
+	}
+	_ = conn.SetDeadline(deadline)
+	tlsConn, err := handshakeUpstreamTLS(ctx, conn, up.Host, nil)
+	if err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	_ = conn.SetDeadline(time.Time{})
+	return tlsConn, nil
+}
+
+func handshakeUpstreamTLS(ctx context.Context, conn net.Conn, host string, baseConfig *tls.Config) (net.Conn, error) {
+	config := &tls.Config{MinVersion: tls.VersionTLS12, ServerName: host}
+	if baseConfig != nil {
+		config = baseConfig.Clone()
+		config.ServerName = host
+		if config.MinVersion == 0 {
+			config.MinVersion = tls.VersionTLS12
+		}
+	}
+	tlsConn := tls.Client(conn, config)
+	if err := tlsConn.HandshakeContext(ctx); err != nil {
+		return nil, fmt.Errorf("upstream TLS handshake: %w", err)
+	}
+	return tlsConn, nil
+}
+
 var bufReaderPool = sync.Pool{
 	New: func() interface{} { return bufio.NewReaderSize(nil, 16384) },
 }
@@ -175,59 +309,56 @@ func tuneTCP(c net.Conn) {
 }
 
 func relayTCP(clientConn, upConn net.Conn, clientBuf *bufio.Reader) (int64, int64) {
-	cTCP, ok1 := clientConn.(*net.TCPConn)
-	uTCP, ok2 := upConn.(*net.TCPConn)
-	if !ok1 || !ok2 {
-		return 0, 0
-	}
-
 	var bUp, bDown int64
-	done := make(chan struct{}, 2)
+	done := make(chan error, 2)
 
 	go func() {
-		defer func() { done <- struct{}{} }()
-		var pre int64
-		if clientBuf != nil && clientBuf.Buffered() > 0 {
-			b, err := clientBuf.Peek(clientBuf.Buffered())
-			if err == nil && len(b) > 0 {
-				nw, wErr := uTCP.Write(b)
-				pre = int64(nw)
-				if wErr != nil {
-					atomic.StoreInt64(&bUp, pre)
-					_ = uTCP.Close()
-					_ = cTCP.Close()
-					return
-				}
-				_, _ = clientBuf.Discard(len(b))
+		var src io.Reader = clientConn
+		if clientBuf != nil {
+			src = io.MultiReader(clientBuf, clientConn)
+		}
+		n, err := io.Copy(upConn, src)
+		atomic.StoreInt64(&bUp, n)
+		if err == nil {
+			if cw, ok := upConn.(interface{ CloseWrite() error }); ok {
+				err = cw.CloseWrite()
+			} else {
+				err = upConn.Close()
 			}
 		}
-		n, _ := io.Copy(uTCP, cTCP)
-		atomic.StoreInt64(&bUp, pre+n)
-		_ = uTCP.CloseWrite()
+		done <- err
 	}()
 
 	go func() {
-		defer func() { done <- struct{}{} }()
-		n, _ := io.Copy(cTCP, uTCP)
+		n, err := io.Copy(clientConn, upConn)
 		atomic.StoreInt64(&bDown, n)
-		_ = cTCP.CloseWrite()
+		if err == nil {
+			if cw, ok := clientConn.(interface{ CloseWrite() error }); ok {
+				err = cw.CloseWrite()
+			} else {
+				err = clientConn.Close()
+			}
+		}
+		done <- err
 	}()
 
-	<-done
-	_ = cTCP.SetDeadline(time.Now().Add(5 * time.Second))
-	_ = uTCP.SetDeadline(time.Now().Add(5 * time.Second))
-	<-done
+	if err := <-done; err != nil {
+		_ = clientConn.Close()
+		_ = upConn.Close()
+	}
+	if err := <-done; err != nil {
+		_ = clientConn.Close()
+		_ = upConn.Close()
+	}
 
 	return atomic.LoadInt64(&bUp), atomic.LoadInt64(&bDown)
 }
 
 func dialUpstreamCtx(ctx context.Context, up Upstream, targetHost string, targetPort uint16) (net.Conn, error) {
-	dialer := &net.Dialer{Timeout: 15 * time.Second}
-	conn, err := dialer.DialContext(ctx, "tcp4", up.Addr())
+	conn, err := dialUpstreamTransport(ctx, up)
 	if err != nil {
 		return nil, err
 	}
-	tuneTCP(conn)
 	_ = conn.SetDeadline(time.Now().Add(20 * time.Second))
 
 	if dl, ok := ctx.Deadline(); ok {
@@ -247,21 +378,21 @@ func dialUpstreamCtx(ctx context.Context, up Upstream, targetHost string, target
 
 		if _, err := conn.Write([]byte(sb.String())); err != nil {
 			conn.Close()
-			return nil, err
+			return nil, fmt.Errorf("upstream HTTP CONNECT write: %w", err)
 		}
 		br := bufio.NewReader(conn)
 		resp, err := http.ReadResponse(br, &http.Request{Method: "CONNECT"})
 		if err != nil {
 			conn.Close()
-			return nil, err
+			return nil, fmt.Errorf("upstream HTTP CONNECT handshake: %w", err)
 		}
-		resp.Body.Close()
 		if resp.StatusCode != 200 {
+			_ = resp.Body.Close()
 			conn.Close()
-			return nil, fmt.Errorf("upstream HTTP %d", resp.StatusCode)
+			return nil, fmt.Errorf("upstream HTTP CONNECT rejected with status %d", resp.StatusCode)
 		}
 		_ = conn.SetDeadline(time.Time{})
-		return conn, nil
+		return &bufferedConn{Conn: conn, reader: br}, nil
 	}
 
 	var greet []byte
@@ -281,9 +412,14 @@ func dialUpstreamCtx(ctx context.Context, up Upstream, targetHost string, target
 	}
 	if gResp[0] != 0x05 || gResp[1] == 0xff {
 		conn.Close()
-		return nil, errors.New("upstream SOCKS5 rejected (IP chua whitelist?)")
+		if gResp[0] != 0x05 {
+			return nil, fmt.Errorf("upstream SOCKS5 invalid version %d", gResp[0])
+		}
+		return nil, errors.New("upstream SOCKS5 has no acceptable authentication method")
 	}
-	if gResp[1] == 0x02 {
+	switch gResp[1] {
+	case 0x00:
+	case 0x02:
 		if len(up.User) > 255 || len(up.Pass) > 255 {
 			conn.Close()
 			return nil, errors.New("upstream credentials too long")
@@ -300,8 +436,14 @@ func dialUpstreamCtx(ctx context.Context, up Upstream, targetHost string, target
 		var aResp [2]byte
 		if _, err := io.ReadFull(conn, aResp[:]); err != nil || aResp[1] != 0x00 {
 			conn.Close()
-			return nil, errors.New("upstream SOCKS5 auth failed")
+			if err != nil {
+				return nil, fmt.Errorf("upstream SOCKS5 authentication response: %w", err)
+			}
+			return nil, fmt.Errorf("upstream SOCKS5 authentication rejected with code %d", aResp[1])
 		}
+	default:
+		conn.Close()
+		return nil, fmt.Errorf("upstream SOCKS5 selected unsupported authentication method %d", gResp[1])
 	}
 
 	var req []byte
@@ -350,7 +492,10 @@ func dialUpstreamCtx(ctx context.Context, up Upstream, targetHost string, target
 	}
 	if err != nil || repHdr[1] != 0x00 {
 		conn.Close()
-		return nil, fmt.Errorf("upstream SOCKS5 connect error %d", repHdr[1])
+		if err != nil {
+			return nil, fmt.Errorf("upstream SOCKS5 connect response: %w", err)
+		}
+		return nil, fmt.Errorf("upstream SOCKS5 destination rejected with reply code %d", repHdr[1])
 	}
 
 	_ = conn.SetDeadline(time.Time{})
@@ -534,10 +679,16 @@ func handleSOCKS5(clientConn net.Conn, br *bufio.Reader, pr *PortRunner, up Upst
 	addActiveReq(rec)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	upConn, err := dialUpstreamCtx(ctx, up, sentHost, targetPort)
+	upConn, err := trackUpstreamDial(pr, func() (net.Conn, error) {
+		return dialUpstreamCtx(ctx, up, sentHost, targetPort)
+	})
 	cancel()
 	if err != nil {
-		_, _ = clientConn.Write([]byte{0x05, 0x05, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
+		reply := byte(0x05)
+		if errors.Is(err, errUpstreamLimit) {
+			reply = 0x01
+		}
+		_, _ = clientConn.Write([]byte{0x05, reply, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
 		pr.SetError(err.Error())
 		finishReq(rec, origHost, sentHost, 0, 0, "ERR", err.Error())
 		return
@@ -678,10 +829,12 @@ func handleHTTP(clientConn net.Conn, br *bufio.Reader, pr *PortRunner, up Upstre
 		if isTunnel {
 			req.Body.Close()
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-			upConn, err := dialUpstreamCtx(ctx, up, sentHost, uint16(portNum))
+			upConn, err := trackUpstreamDial(pr, func() (net.Conn, error) {
+				return dialUpstreamCtx(ctx, up, sentHost, uint16(portNum))
+			})
 			cancel()
 			if err != nil {
-				_, _ = clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n"))
+				writeUpstreamDialError(clientConn, err)
 				pr.SetError(err.Error())
 				finishReq(rec, origHost, sentHost, 0, 0, "ERR", err.Error())
 				return
@@ -719,20 +872,25 @@ func handleHTTPPlain(clientConn net.Conn, req *http.Request, pr *PortRunner, up 
 	var upConn net.Conn
 	var err error
 	if up.Proto == "http" {
-		upConn, err = net.DialTimeout("tcp4", up.Addr(), 15*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		upConn, err = trackUpstreamDial(pr, func() (net.Conn, error) {
+			return dialUpstreamTransport(ctx, up)
+		})
+		cancel()
 	} else {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		upConn, err = dialUpstreamCtx(ctx, up, sentHost, portNum)
+		upConn, err = trackUpstreamDial(pr, func() (net.Conn, error) {
+			return dialUpstreamCtx(ctx, up, sentHost, portNum)
+		})
 		cancel()
 	}
 	if err != nil {
-		_, _ = clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n"))
+		writeUpstreamDialError(clientConn, err)
 		pr.SetError(err.Error())
 		finishReq(rec, origHost, sentHost, 0, 0, "ERR", err.Error())
 		return false
 	}
 	defer upConn.Close()
-	tuneTCP(upConn)
 	_ = upConn.SetDeadline(time.Now().Add(25 * time.Second))
 
 	req.Header.Del("Proxy-Authorization")

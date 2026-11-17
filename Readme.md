@@ -1,8 +1,12 @@
-# 1. Lệnh cài đặt 1 dòng (Xóa sạch cache GitHub ngay khi vừa Push)
+# 1. Lệnh cài đặt an toàn (ghim theo commit SHA)
 ```
-SHA=$(curl -4 -sSL -H "Accept: application/vnd.github.sha" -H "Cache-Control: no-cache" "https://api.github.com/repos/tech-tnitechsolve/Shield_Proxy/commits/main?t=$(date +%s)" 2>/dev/null) && [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || SHA="main"; curl -4 -sSL -H "Cache-Control: no-cache" "https://raw.githubusercontent.com/tech-tnitechsolve/Shield_Proxy/${SHA}/install.sh?t=$(date +%s)" | tr -d '\r' | sudo bash
+set -o pipefail
+SHA=$(curl -4 -fsSL -H "Accept: application/vnd.github.sha" -H "Cache-Control: no-cache" "https://api.github.com/repos/tech-tnitechsolve/Shield_Proxy/commits/main?t=$(date +%s)") || exit 1
+[[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "Không lấy được commit SHA hợp lệ."; exit 1; }
+curl -4 -fsSL -H "Cache-Control: no-cache" "https://raw.githubusercontent.com/tech-tnitechsolve/Shield_Proxy/${SHA}/install.sh" | tr -d '\r' | sudo bash
 ```
 # Cập Nhật Lại Bản Mới
+Có thể bấm **Cập nhật phiên bản** trên Dashboard sau khi đăng nhập. Tiến trình cập nhật chạy riêng bằng systemd, nên việc khởi động lại ProxyShield không làm dừng updater.
 ```
 sudo ps-update
 ```
